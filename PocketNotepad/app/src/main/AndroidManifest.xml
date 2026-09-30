@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Nothing Glyph: opt-in, absent on other devices, never fatal. The GDK
+         declares minSdk 33, but every entry point is wrapped in GlyphSupport
+         (which no-ops unless a supported device registers successfully), so
+         the app keeps its own minSdk 26 rather than excluding older phones. -->
+    <uses-permission android:name="com.nothing.ketchum.permission.ENABLE" />
+    <uses-sdk tools:overrideLibrary="com.nothing.thirdparty" />
+    <application android:allowBackup="false" android:supportsRtl="true"
+        android:label="@string/app_name" android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher" android:theme="@style/Theme.PocketNotepad">
+        <!-- GDK key: "test" is Nothing's documented debug key; a real key is
+             only required for release builds on pre-Android-16 devices. -->
+        <meta-data android:name="NothingKey" android:value="test" />
+        <activity android:name=".MainActivity" android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- Share-as-file: hands recipients a read-only view of a staged file. -->
+        <provider android:name="androidx.core.content.FileProvider"
+            android:authorities="dev.pocket.notepad.fileprovider"
+            android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>

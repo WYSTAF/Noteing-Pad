@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<dev.pocket.notepad.ui.NotepadEditText
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:allowUndo="false" android:background="@android:color/transparent"
+    android:gravity="top|start" android:inputType="textMultiLine|textNoSuggestions"
+    android:imeOptions="flagNoExtractUi"
+    android:fontFamily="monospace" android:textSize="15sp" android:padding="16dp"
+    android:scrollbars="none"
+    android:overScrollMode="ifContentScrolls"
+    android:saveEnabled="false" android:hint="@string/editor_hint"
+    android:textCursorDrawable="@drawable/caret" />

@@ -1,0 +1,53 @@
+# Complete project file tree
+
+```text
+PocketNotepad/
+  .github/workflows/android.yml
+  .gitignore
+  FILE_MANIFEST.sha256
+  LICENSE
+  README.md
+  TESTING.md
+  TREE.md
+  VERIFICATION.md
+  app/build.gradle.kts
+  app/proguard-rules.pro
+  app/src/androidTest/java/dev/pocket/notepad/data/PdfExporterTest.kt
+  app/src/main/AndroidManifest.xml
+  app/src/main/java/dev/pocket/notepad/MainActivity.kt
+  app/src/main/java/dev/pocket/notepad/NotepadViewModel.kt
+  app/src/main/java/dev/pocket/notepad/data/FileExporter.kt
+  app/src/main/java/dev/pocket/notepad/data/NotepadRepository.kt
+  app/src/main/java/dev/pocket/notepad/data/PdfExporter.kt
+  app/src/main/java/dev/pocket/notepad/data/SafFiles.kt
+  app/src/main/java/dev/pocket/notepad/data/TextCodec.kt
+  app/src/main/java/dev/pocket/notepad/model/DocumentModels.kt
+  app/src/main/java/dev/pocket/notepad/model/Rope.kt
+  app/src/main/java/dev/pocket/notepad/ui/EditorIcons.kt
+  app/src/main/java/dev/pocket/notepad/ui/EditorScreen.kt
+  app/src/main/java/dev/pocket/notepad/ui/ExportDialog.kt
+  app/src/main/java/dev/pocket/notepad/ui/NativeEditor.kt
+  app/src/main/java/dev/pocket/notepad/ui/TopBar.kt
+  app/src/main/java/dev/pocket/notepad/ui/theme/Color.kt
+  app/src/main/java/dev/pocket/notepad/ui/theme/Theme.kt
+  app/src/main/java/dev/pocket/notepad/ui/theme/Type.kt
+  app/src/main/res/drawable/ic_launcher.xml
+  app/src/main/res/layout/editor_view.xml
+  app/src/main/res/values-night/styles.xml
+  app/src/main/res/values/strings.xml
+  app/src/main/res/values/styles.xml
+  app/src/test/java/dev/pocket/notepad/data/TextCodecTest.kt
+  app/src/test/java/dev/pocket/notepad/model/EditHistoryTest.kt
+  app/src/test/java/dev/pocket/notepad/model/ExportSpecTest.kt
+  app/src/test/java/dev/pocket/notepad/model/RopeTest.kt
+  build.gradle.kts
+  gradle.properties
+  gradle/wrapper/gradle-wrapper.properties
+  gradlew
+  gradlew.bat
+  settings.gradle.kts
+  tools/bootstrap-wrapper.ps1
+  tools/verify_rope_model.py
+```
+
+The official Gradle wrapper JAR is downloaded and checksum-verified by the first invocation of gradlew or gradlew.bat; it is not a missing application source file.

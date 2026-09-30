@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Converted from "Noteing Pad Logo.svg" (user-provided); geometry preserved.
+     Group scale 0.66 keeps the widest element inside the adaptive icon's
+     circular safe zone (worst-case mask; squircle launchers show more). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="312" android:viewportHeight="312">
+    <group android:scaleX="0.66" android:scaleY="0.66"
+        android:pivotX="156" android:pivotY="156">
+        <path android:fillColor="#131313"
+            android:pathData="M82.43,58.73 h144.75 a25,25 0 0 1 25,25 a25,25 0 0 1 -25,25 h-144.75 a25,25 0 0 1 -25,-25 a25,25 0 0 1 25,-25 z" />
+        <path android:fillColor="#131313"
+            android:pathData="M82.43,131 h144.75 a25,25 0 0 1 25,25 a25,25 0 0 1 -25,25 h-144.75 a25,25 0 0 1 -25,-25 a25,25 0 0 1 25,-25 z" />
+        <path android:fillColor="#131313"
+            android:pathData="M82.43,203.27 h72.37 a25,25 0 0 1 25,25 a25,25 0 0 1 -25,25 h-72.37 a25,25 0 0 1 -25,-25 a25,25 0 0 1 25,-25 z" />
+        <path android:fillColor="#D92C35"
+            android:pathData="M229.57,203.28 a25,25 0 1 0 0,50 a25,25 0 1 0 0,-50 z" />
+    </group>
+</vector>

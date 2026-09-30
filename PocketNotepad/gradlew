@@ -1,0 +1,34 @@
+#!/bin/sh
+# First run retrieves the official, checksum-verified wrapper JAR.
+# Subsequent runs use that official wrapper to retrieve/check Gradle itself.
+set -eu
+APP_HOME=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+JAR="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+EXPECTED=2db75c40782f5e8ba1fc278a5574bab070adccb2d21ca5a6e5ed840888448046
+checksum() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d ' ' -f 1
+    elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d ' ' -f 1
+    elif command -v openssl >/dev/null 2>&1; then openssl dgst -sha256 "$1" | awk '{print $NF}'
+    else echo 'Install sha256sum, shasum, or openssl to verify the wrapper.' >&2; exit 1
+    fi
+}
+if [ ! -f "$JAR" ]; then
+    echo 'Downloading the official Gradle 8.11.1 wrapper JAR...'
+    TEMP=$(mktemp "$JAR.tmp.XXXXXX")
+    trap 'rm -f "$TEMP"' EXIT HUP INT TERM
+    URL=https://raw.githubusercontent.com/gradle/gradle/v8.11.1/gradle/wrapper/gradle-wrapper.jar
+    if command -v curl >/dev/null 2>&1; then
+        curl --fail --location --proto '=https' --tlsv1.2 --connect-timeout 20 --max-time 180 "$URL" -o "$TEMP"
+    elif command -v wget >/dev/null 2>&1; then
+        wget --https-only --timeout=180 "$URL" -O "$TEMP"
+    else
+        echo 'Install curl or wget, then run this command again.' >&2
+        exit 1
+    fi
+    [ "$(checksum "$TEMP")" = "$EXPECTED" ] || { echo 'Wrapper checksum mismatch. Refusing to execute it.' >&2; exit 1; }
+    mv "$TEMP" "$JAR"
+    trap - EXIT HUP INT TERM
+fi
+[ "$(checksum "$JAR")" = "$EXPECTED" ] || { echo 'Wrapper checksum mismatch. Refusing to execute it.' >&2; exit 1; }
+if [ -n "${JAVA_HOME:-}" ]; then JAVA="$JAVA_HOME/bin/java"; else JAVA=java; fi
+exec "$JAVA" -Dorg.gradle.appname=gradlew -classpath "$JAR" org.gradle.wrapper.GradleWrapperMain "$@"
