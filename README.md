@@ -66,8 +66,7 @@ devices — the app runs identically everywhere, minus the lights.
 ## Project layout
 
 ```
-├── Noteing Pad Icon_*.svg     # original 1024×1024 icon sources
-├── Noteing Pad Logo.svg
+├── svg/                      # original 1024×1024 icon sources + logo
 ├── LED Dot-Matrix 400.ttf     # Glyph matrix typeface
 └── PocketNotepad/
     ├── app/src/main/java/dev/pocket/notepad/
