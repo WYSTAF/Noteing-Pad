@@ -1,5 +1,9 @@
 # Noteing Pad
 
+<p align="center">
+  <img src=".github/assets/logo.svg" width="160" alt="Noteing Pad logo — black sheet with a red pen-dot" />
+</p>
+
 ![Platform](https://img.shields.io/badge/android-8.0%2B-3DDC84?logo=android)
 ![License](https://img.shields.io/badge/license-Apache%202.0-D92C35)
 ![Nothing](https://img.shields.io/badge/glyph-Nothing%20GDK-111111)
