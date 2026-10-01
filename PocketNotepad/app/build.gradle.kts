@@ -10,8 +10,8 @@ android {
         applicationId = "dev.pocket.notepad"
         minSdk = 26
         targetSdk = 35
-        versionCode = 22
-        versionName = "1.8.0"
+        versionCode = 23
+        versionName = "1.8.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {

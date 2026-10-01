@@ -17,28 +17,33 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.min
 
 enum class EditorSymbol { NEW, OPEN, IMPORT, ADD, PASTE, SHARE, UNDO, REDO, CLEAR, EXPORT, MORE, BACK, NEXT, DELETE, TRASH, ERASE }
 
 /**
  * Icons from the user's Noteing Pad icon set (1024x1024 SVGs, geometry copied
- * verbatim). They are drawn in Canvas rather than loaded as tinted vector
- * drawables because each icon carries a #d92c35 accent that a tint would
- * flatten; strokes take LocalContentColor, so light/dark still work.
+ * verbatim). Drawn in Canvas rather than loaded as tinted vector drawables
+ * because each icon carries a #d92c35 accent that a tint would flatten;
+ * strokes take LocalContentColor, so light/dark still work.
  */
-private const val S = 0.0263f      // 1024-space -> 24-space scale
-private const val OX = -1.42f      // x offset, centres the mark in the box
-private const val OY = -1.20f      // y offset
 private val AccentRed = Color(0xFFD92C35)
 
-// Number params so Int, Float and Double literals from the SVG source all
-// widen implicitly; Kotlin does not narrow between numeric types at a call site.
-private fun fx(x: Number): Float = (x.toDouble() * S + OX).toFloat()
-private fun fy(y: Number): Float = (y.toDouble() * S + OY).toFloat()
+/**
+ * Design space. The marks were drawn around (512, 506); the union of all
+ * geometry across the set spans 750 x 812 of the 1024 viewBox (measured from
+ * the SVG sources). The first transform scaled the raw 1024 grid by a fixed
+ * pixel constant, so a mark filled ~a third of the box with a 0.8 px stroke —
+ * the "icons are bad" report. Fitting is now computed per draw from the real
+ * canvas size: resolution-independent, optically centred on the union, and
+ * the 30-unit design stroke lands at a visible ~4% of the mark.
+ */
+private const val MARK_CX = 512f
+private const val MARK_CY = 506f
+private const val MARK_SPAN = 812f       // the larger union dimension
+private const val MARK_FILL = 0.85f      // fraction of the box the union fills
 
 // --- source geometry -------------------------------------------------------
-// The document sheet is shared by several glyphs; poly() points use the SVG
-// "x y x y ..." form, converted to an explicit L list.
 private val DOC_SHEET =
     "M162,212.25v599.5c0,55.23,44.77,100,100,100h500c55.23,0,100-44.77,100-100v-449.5c-97.63-97.63-152.37-152.37-250-250h-350c-55.23,0-100,44.77-100,100Z"
 private val DOC_FOLD = "M612,112.25v150c0,55.23,44.77,100,100,100h150"
@@ -60,7 +65,7 @@ private val SAVE_BODY =
     "M162,212.25v599.5c0,55.23,44.77,100,100,100h500c55.23,0,100-44.77,100-100v-499.5c-78.1-78.1-121.9-121.9-200-200h-400c-55.23,0-100,44.77-100,100Z"
 private val SAVE_SLOT = "M312.1,509.39h399.9c27.6,0,50,22.4,50,50v352.36h-499.9v-352.36c0-27.6,22.4-50,50-50Z"
 
-/** Per-symbol slots: stroked outlines first, then filled shapes. */
+/** Per-symbol slots: stroked source paths in SVG document order. */
 internal fun sourcesFor(symbol: EditorSymbol): List<String> = when (symbol) {
     EditorSymbol.NEW, EditorSymbol.ADD -> listOf(DOC_SHEET, DOC_FOLD)
     EditorSymbol.IMPORT, EditorSymbol.OPEN, EditorSymbol.PASTE, EditorSymbol.SHARE ->
@@ -74,24 +79,8 @@ internal fun sourcesFor(symbol: EditorSymbol): List<String> = when (symbol) {
     EditorSymbol.MORE, EditorSymbol.BACK, EditorSymbol.NEXT -> emptyList()
 }
 
-private val cache = ConcurrentHashMap<EditorSymbol, List<Path>>()
+// --- parsing ---------------------------------------------------------------
 
-/** Parsed once per symbol; the draw scope only reads the cached Path objects. */
-internal fun iconPath(symbol: EditorSymbol, slot: Int): Path? =
-    cache.getOrPut(symbol) { sourcesFor(symbol).map { parsePath(it) } }.getOrNull(slot)
-
-/**
- * SVG path parser covering the command set these icons actually use, in both
- * absolute and relative form (M L H V C Z).
- *
- * The previous version matched only M/L/C/Z, so a relative 'v' or 'h' was
- * never treated as a command; the number stream then desynchronised and the
- * parser walked off the end of the token list — an IndexOutOfBoundsException
- * on the very first icon drawn, which is what killed v1.7.0 at launch.
- *
- * This one is total: every branch bounds-checks its arguments and returns the
- * path built so far, so malformed geometry can never throw.
- */
 /**
  * A parsed, Android-free segment stream. Kept separate from Path so the
  * geometry can be unit-tested on the JVM (android.graphics.Path is a stub
@@ -110,10 +99,10 @@ internal data class Seg(
  * SVG path parser covering the command set these icons use, absolute and
  * relative (M L H V C Z), resolving relatives against a tracked cursor.
  *
- * The previous parser matched only M/L/C/Z, so a relative 'v' or 'h' was never
- * treated as a command; the number stream desynchronised and it walked off the
- * end of the token list — IndexOutOfBoundsException on the first icon drawn,
- * which is what killed v1.7.0 at launch.
+ * The very first parser matched only M/L/C/Z, so a relative 'v' or 'h' was
+ * never treated as a command; the number stream desynchronised and it walked
+ * off the end of the token list — IndexOutOfBoundsException on the first icon
+ * drawn, which killed v1.7.0 at launch.
  *
  * Total by construction: every command bounds-checks its arguments, and an
  * incomplete command ends the parse instead of throwing. `strict` is used by
@@ -208,12 +197,27 @@ internal fun parseSegments(d: String, strict: Boolean = false): List<Seg> {
     return out
 }
 
-/** Builds the Compose Path from pre-parsed segments. */
-private fun parsePath(d: String): Path {
+// --- caching + rendering ---------------------------------------------------
+
+/** Geometry parsed once per symbol, kept in DESIGN space (untransformed):
+ *  the transform depends on the canvas size, which is only known at draw. */
+private val segCache = ConcurrentHashMap<EditorSymbol, List<List<Seg>>>()
+
+private fun segmentsFor(symbol: EditorSymbol): List<List<Seg>> =
+    segCache.getOrPut(symbol) { sourcesFor(symbol).map { parseSegments(it) } }
+
+/** Transformed paths, memoised per symbol AND scale. The scale key only
+ *  changes with canvas size/density, so every frame reuses one list. */
+private val pathCache = ConcurrentHashMap<Pair<EditorSymbol, Float>, List<Path>>()
+
+/** Design-space segments -> Path through the draw-time transform. */
+private fun buildPath(segs: List<Seg>, s: Float, ox: Float, oy: Float): Path {
     val p = Path()
     var cx = 0f
     var cy = 0f
-    for (seg in parseSegments(d)) {
+    fun fx(x: Float) = (x - MARK_CX) * s + ox
+    fun fy(y: Float) = (y - MARK_CY) * s + oy
+    for (seg in segs) {
         when (seg.command) {
             'M' -> { cx = seg.args[0]; cy = seg.args[1]; p.moveTo(fx(cx), fy(cy)) }
             'L' -> { cx = seg.args[0]; cy = seg.args[1]; p.lineTo(fx(cx), fy(cy)) }
@@ -227,39 +231,57 @@ private fun parsePath(d: String): Path {
     return p
 }
 
-/** Closed polygon from an SVG "points" list ("x y x y ..."). */
-private fun polyPath(points: String): Path {
-    val p = Path()
-    val nums = points.trim().split(Regex("[ ,]+")).mapNotNull { it.toFloatOrNull() }
-    if (nums.size < 4) return p
-    p.moveTo(fx(nums[0]), fy(nums[1]))
-    var i = 2
-    while (i + 1 < nums.size) {
-        p.lineTo(fx(nums[i]), fy(nums[i + 1]))
-        i += 2
-    }
-    p.close()
-    return p
-}
-
 @Composable
 fun EditorIcon(symbol: EditorSymbol, description: String) {
     val color = LocalContentColor.current
     Canvas(Modifier.size(22.dp).semantics { contentDescription = description }) {
-        val stroke = Stroke(width = 30f * S, cap = StrokeCap.Round, join = StrokeJoin.Round)
-        fun strokeSlot(slot: Int, c: Color = color) = iconPath(symbol, slot)?.let { drawPath(it, c, style = stroke) }
+        val s = MARK_FILL * min(size.width, size.height) / MARK_SPAN
+        val ox = size.width / 2f
+        val oy = size.height / 2f
+        fun fx(x: Number): Float = (x.toFloat() - MARK_CX) * s + ox
+        fun fy(y: Number): Float = (y.toFloat() - MARK_CY) * s + oy
+        // The SVG set is stroke-based, but its 30-unit stroke (3% of the
+        // viewBox) renders hairline-thin in a 22dp box. Icons in this app's
+        // Material context read best at ~8% of the box; the stroke is pinned
+        // to that weight so every mark stays visibly crisp across densities.
+        val stroke = Stroke(width = 0.08f * min(size.width, size.height),
+            cap = StrokeCap.Round, join = StrokeJoin.Round)
+
+        val paths = pathCache.getOrPut(symbol to s) {
+            segmentsFor(symbol).map { buildPath(it, s, ox, oy) }
+        }
+        fun strokeSlot(slot: Int, c: Color = color) =
+            paths.getOrNull(slot)?.let { drawPath(it, c, style = stroke) }
         fun line(x1: Number, y1: Number, x2: Number, y2: Number, c: Color = color) =
             drawLine(c, Offset(fx(x1), fy(y1)), Offset(fx(x2), fy(y2)), stroke.width, StrokeCap.Round)
         fun dot(cx: Number, cy: Number, r: Number, c: Color) =
-            drawCircle(c, radius = (r.toDouble() * S).toFloat(), center = Offset(fx(cx), fy(cy)))
-        // STROKED rounded outline (rect class cls-2: fill:none; stroke 30).
-        // The old port filled these solid, turning clips and folder fronts
-        // into black blobs — the biggest single reason the icons looked wrong.
+            drawCircle(c, radius = r.toFloat() * s, center = Offset(fx(cx), fy(cy)))
+        // STROKED rounded outline (SVG rects: fill:none, stroke 30). The first
+        // port filled these solid, turning clips and folder fronts into blobs.
         fun outlineBox(x: Number, y: Number, w: Number, h: Number, r: Number, c: Color = color) =
             drawRoundRect(c, topLeft = Offset(fx(x), fy(y)),
-                size = Size((w.toDouble() * S).toFloat(), (h.toDouble() * S).toFloat()),
-                cornerRadius = CornerRadius((r.toDouble() * S).toFloat(), (r.toDouble() * S).toFloat()),
+                size = Size(w.toFloat() * s, h.toFloat() * s),
+                cornerRadius = CornerRadius(r.toFloat() * s, r.toFloat() * s),
                 style = stroke)
+        fun polyPath(points: String, close: Boolean): Path {
+            val p = Path()
+            val nums = points.trim().split(Regex("[ ,]+")).mapNotNull { it.toFloatOrNull() }
+            if (nums.size < 4) return p
+            p.moveTo(fx(nums[0]), fy(nums[1]))
+            var i = 2
+            while (i + 1 < nums.size) {
+                p.lineTo(fx(nums[i]), fy(nums[i + 1]))
+                i += 2
+            }
+            if (close) p.close()
+            return p
+        }
+        // Filled closed polygon (SVG polygon: filled arrowheads/tips).
+        fun fillPoly(points: String, c: Color) = drawPath(polyPath(points, close = true), c)
+        // Open STROKED polyline (SVG polyline: the import/share trays). Must
+        // NOT close — a closing edge would stroke a line the design omits.
+        fun strokePoly(points: String, c: Color = color) =
+            drawPath(polyPath(points, close = false), c, style = stroke)
 
         when (symbol) {
             // Sheet with a plus; the horizontal arm of the + is red.
@@ -282,38 +304,35 @@ fun EditorIcon(symbol: EditorSymbol, description: String) {
             // Clipboard with a red down arrow (import / open a file).
             EditorSymbol.IMPORT, EditorSymbol.OPEN -> {
                 strokeSlot(0)                                  // clipboard outline
-                outlineBox(337, 112.25, 350, 100, 50)         // clip pill: STROKED
-                // Open tray: SVG is an open polyline (cls-2), stroked, not closed.
-                drawPath(polyPath("412 661.75 412 762.25 612 762.25 612 661.75"), color, style = stroke)
-                line(512, 623.75, 512, 524.25, AccentRed)     // arrow shaft
-                // Arrow tip is filled red (cls-3).
-                drawPath(polyPath("457.33 616.42 566.67 616.42 512 671.07 457.33 616.42"), AccentRed)
+                outlineBox(337, 112.25, 350, 100, 50)         // clip pill: stroked
+                strokePoly("412 661.75 412 762.25 612 762.25 612 661.75")  // open tray
+                line(512, 623.75, 512, 524.25, AccentRed)      // arrow shaft
+                fillPoly("457.33 616.42 566.67 616.42 512 671.07 457.33 616.42", AccentRed)
             }
             // Clipboard with three rules, the middle one red.
             EditorSymbol.PASTE -> {
-                strokeSlot(0)                                  // clipboard outline
-                outlineBox(337, 112.25, 350, 100, 50)         // clip pill: STROKED
+                strokeSlot(0)
+                outlineBox(337, 112.25, 350, 100, 50)
                 line(412, 661.75, 612, 661.75)
                 line(412, 562.25, 612, 562.25, AccentRed)
                 line(412, 762.25, 612, 762.25)
             }
             // Clipboard with a red up arrow (share the note as a file).
             EditorSymbol.SHARE -> {
-                strokeSlot(0)                                  // clipboard outline
-                outlineBox(337, 112.25, 350, 100, 50)         // clip pill: STROKED
-                // Open tray: stroked open polyline, not a filled block.
-                drawPath(polyPath("412 661.75 412 762.25 612 762.25 612 661.75"), color, style = stroke)
-                line(512, 661.75, 512, 562.25, AccentRed)     // shaft (cls-1 red)
-                drawPath(polyPath("457.33 569.58 566.67 569.58 512 514.93 457.33 569.58"), AccentRed)
+                strokeSlot(0)
+                outlineBox(337, 112.25, 350, 100, 50)
+                strokePoly("412 661.75 412 762.25 612 762.25 612 661.75")
+                line(512, 661.75, 512, 562.25, AccentRed)
+                fillPoly("457.33 569.58 566.67 569.58 512 514.93 457.33 569.58", AccentRed)
             }
             EditorSymbol.UNDO -> {
                 strokeSlot(0)
-                drawPath(polyPath("432.87 437.49 329.25 377.66 432.87 317.82 432.87 437.49"), color)
+                fillPoly("432.87 437.49 329.25 377.66 432.87 317.82 432.87 437.49", color)
                 dot(459.52, 610.58, 35.78, AccentRed)
             }
             EditorSymbol.REDO -> {
                 strokeSlot(0)
-                drawPath(polyPath("591.13 437.49 694.75 377.66 591.13 317.82 591.13 437.49"), color)
+                fillPoly("591.13 437.49 694.75 377.66 591.13 317.82 591.13 437.49", color)
                 dot(564.48, 610.57, 35.78, AccentRed)
             }
             // Tray with an X; one stroke of the X is red.
@@ -324,8 +343,8 @@ fun EditorIcon(symbol: EditorSymbol, description: String) {
                 line(441.29, 720.21, 582.71, 578.79, AccentRed)
                 line(137, 200.12, 887, 200.12)
             }
-            // Floppy: save-as / export. Shutter is STROKED red (SVG rect
-            // class cls-1), not filled — the old port drew a solid red slab.
+            // Floppy: save-as / export. Shutter is a STROKED red outline
+            // (SVG rect cls-1), not the solid slab the first port drew.
             EditorSymbol.EXPORT -> {
                 strokeSlot(0); strokeSlot(1); strokeSlot(2)
                 outlineBox(347.58, 200.61, 100, 161.64, 0f, AccentRed)
@@ -339,22 +358,23 @@ fun EditorIcon(symbol: EditorSymbol, description: String) {
             // Left arrow with a red dot (back to library).
             EditorSymbol.BACK -> {
                 line(405.2, 511.36, 568.39, 511.36)
-                drawPath(polyPath("422.71 571.2 319.09 511.37 422.71 451.53 422.71 571.2"), color)
+                fillPoly("422.71 571.2 319.09 511.37 422.71 451.53 422.71 571.2", color)
                 dot(669.13, 512, 35.78, AccentRed)
             }
-            // Right arrow with a red dot (restore from trash).
+            // Right arrow with a red dot (restore from trash). Shaft is
+            // BLACK in the source (cls-1 in this file's stylesheet), not red.
             EditorSymbol.NEXT -> {
-                line(326.57, 512, 489.77, 512, AccentRed)
-                drawPath(polyPath("472.26 571.84 575.88 512.01 472.26 452.17 472.26 571.84"), color)
+                line(326.57, 512, 489.77, 512)
+                fillPoly("472.26 571.84 575.88 512.01 472.26 452.17 472.26 571.84", color)
                 dot(661.65, 512, 35.78, AccentRed)
             }
-            // Folder with an X (trash). SVG: folder TAB is RED (cls-1), the
-            // front is a stroked rounded outline (cls-2) — the old port filled
-            // the front solid: a giant black rectangle.
+            // Folder with an X (trash). Folder TAB is RED in the source
+            // (cls-1 in this file's stylesheet); the front is a stroked
+            // rounded outline, not the solid blob the first port drew.
             EditorSymbol.TRASH -> {
-                strokeSlot(0, AccentRed)                       // tab: red (cls-1)
-                strokeSlot(1)                                  // folder body outline
-                outlineBox(174.5, 300.61, 700, 598.89, 100)   // front: STROKED
+                strokeSlot(0, AccentRed)
+                strokeSlot(1)
+                outlineBox(174.5, 300.61, 700, 598.89, 100)
                 line(483.4, 617.4, 441.29, 575.29)
                 line(582.71, 716.71, 540.39, 674.39)
                 line(441.29, 716.71, 582.71, 575.29, AccentRed)
