@@ -20,7 +20,7 @@ import dev.pocket.notepad.model.ThemeMode
 @Composable
 fun TopBar(
     state: EditorUiState, onBack: () -> Unit, onTitleTap: () -> Unit,
-    onPaste: () -> Unit, onShare: () -> Unit, onClear: () -> Unit,
+    onPaste: () -> Unit, onShare: () -> Unit,
     onUndo: () -> Unit, onRedo: () -> Unit,
     onExport: () -> Unit, onTheme: (ThemeMode) -> Unit,
     onLineNumbers: (Boolean) -> Unit, onAutoName: (Boolean) -> Unit,
@@ -99,7 +99,9 @@ fun TopBar(
                 }
             }
         }
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+        // Static action row — no scrolling, exactly the five actions the user
+        // chose: paste, share, md, undo, redo. (Clear moved out of the row.)
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             SquareButton("PASTE", EditorSymbol.PASTE, available, onPaste)
@@ -107,7 +109,6 @@ fun TopBar(
             SquareButton("MD", EditorSymbol.ADD, available, onMarkdown)
             SquareButton(EditorSymbol.UNDO, "Undo", available && state.canUndo, onUndo)
             SquareButton(EditorSymbol.REDO, "Redo", available && state.canRedo, onRedo)
-            SquareButton(EditorSymbol.CLEAR, "Clear text", available && state.root.isNotEmpty(), onClear)
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
     }

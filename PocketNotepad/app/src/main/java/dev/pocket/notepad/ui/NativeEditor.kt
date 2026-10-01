@@ -54,8 +54,10 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
     // — those pokes were being coalesced/skipped on some devices, freezing the
     // numbers until the next selection change. There is no such window here.
     private val density = resources.displayMetrics.density
-    private val gutterWidthPx = 56f * density       // band: numbers right-align here
-    private val textLeftPadPx = 72f * density       // 16dp breathing room after band
+    // Gutter sized for a 4-digit column ("9999") with room for the compact
+    // 10k / 10.6k / 34.8k forms beyond it — never widens past these.
+    private val gutterWidthPx = 40f * density       // band: numbers right-align here
+    private val textLeftPadPx = 56f * density       // 16dp breathing room after band
     private val edgePadPx = 16f * density           // matches editor_view.xml padding
     private val numberPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         // Explicit init: Paint defaults to opaque BLACK, which combined with

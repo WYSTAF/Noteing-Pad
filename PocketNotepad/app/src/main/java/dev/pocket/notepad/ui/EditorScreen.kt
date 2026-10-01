@@ -36,8 +36,6 @@ fun EditorScreen(model: NotepadViewModel) {
     val trash by model.trash.collectAsStateWithLifecycle()
     val snackbars = remember { SnackbarHostState() }
     var exportDialog by rememberSaveable { mutableStateOf(false) }
-    var clearDialog by rememberSaveable { mutableStateOf(false) }
-    var pendingDelete by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingErase by rememberSaveable { mutableStateOf<String?>(null) }
     var renameDialog by rememberSaveable { mutableStateOf(false) }
     var shareFormatDialog by rememberSaveable { mutableStateOf(false) }
@@ -93,7 +91,7 @@ fun EditorScreen(model: NotepadViewModel) {
         Column(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets)) {
             when (state.screen) {
                 Screen.LIBRARY -> LibraryScreen(notes, model::newNote, model::openNote,
-                    { pendingDelete = it }, requestImport, model::openTrash,
+                    model::deleteNote, requestImport, model::openTrash,
                     Modifier.fillMaxWidth().weight(1f))
                 Screen.TRASH -> TrashScreen(trash, model::backToLibrary, model::restoreNote,
                     { pendingErase = it }, { confirmEmptyTrash = true },
@@ -101,7 +99,7 @@ fun EditorScreen(model: NotepadViewModel) {
                 Screen.EDITOR -> {
                     TopBar(state, model::backToLibrary, { renameDialog = true },
                         model::paste, { if (!model.blocked) shareFormatDialog = true },
-                        { clearDialog = true }, model::undo, model::redo, requestExport,
+                        model::undo, model::redo, requestExport,
                         model::setTheme, model::setLineNumbers, model::setAutoName,
                         { markdownDialog = true },
                         state.glyph, state.glyphAvailable, model::setGlyphEnabled, frameStats)
@@ -145,62 +143,60 @@ fun EditorScreen(model: NotepadViewModel) {
         exportDialog = false
         model.prepareExport(spec)
     }
-    if (pendingDelete != null) AlertDialog(
-        onDismissRequest = { pendingDelete = null },
-        title = { Text("Move this note to trash?") },
-        text = { Text("The note leaves the library and stays in the trash for ${Limits.TRASH_RETENTION_DAYS} days before being erased. Restore it anytime from the trash screen.") },
-        confirmButton = {
-            TextButton(onClick = { pendingDelete?.let(model::deleteNote); pendingDelete = null }) { Text("MOVE TO TRASH") }
-        },
-        dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("CANCEL") } }
+}
+
+/**
+ * Markdown insert palette. The app stays a plain-text editor (no renderer on
+ * purpose), so these insert Markdown SOURCE — the exact bytes a .md file holds.
+ * Alignment pairs follow the user's marker convention: a start sign and an end
+ * sign on their own lines; every line between them aligns when the file is
+ * rendered or exported.
+ */
+@Composable
+private fun MarkdownDialog(onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    val blocks = listOf(
+        "HEADING" to "## Heading",
+        "BULLET LIST" to "- Item\n- ",
+        "• BULLET POINT" to "• ",
+        "NUMBERED LIST" to "1. First\n2. ",
+        "TASK LIST" to "- [ ] Todo\n- [x] Done\n",
+        "CODE" to "```\ncode\n```",
+        "QUOTE" to "> quoted text",
+        "TABLE" to "| Column A | Column B |\n| --- | --- |\n| Cell | Cell |\n",
+        "DIVIDER" to "---",
+        "LINK" to "[label](https://)"
     )
-    if (renameDialog) RenameDialog(state.title, { renameDialog = false }) { name ->
-        renameDialog = false
-        model.renameNote(name)
-    }
-    if (markdownDialog) MarkdownDialog({ markdownDialog = false }) { snippet ->
-        markdownDialog = false
-        model.insertMarkdown(snippet)
-    }
-    if (shareFormatDialog) AlertDialog(
-        onDismissRequest = { shareFormatDialog = false },
-        title = { Text("SHARE FORMAT", style = MaterialTheme.typography.titleMedium) },
-        text = { Text("The note is sent as a real file, not pasted text. Choose the format:") },
-        confirmButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SquareButton(onClick = { shareFormatDialog = false; model.shareFile("txt") },
-                    enabled = true, filled = false) { Text("TXT", style = MaterialTheme.typography.labelSmall) }
-                SquareButton(onClick = { shareFormatDialog = false; model.shareFile("md") },
-                    enabled = true, filled = false) { Text("MD", style = MaterialTheme.typography.labelSmall) }
-                SquareButton(onClick = { shareFormatDialog = false; model.shareFile("pdf") },
-                    enabled = true, filled = false) { Text("PDF", style = MaterialTheme.typography.labelSmall) }
+    // Alignment markers: start/end sign pair; text between the pair aligns.
+    val alignments = listOf(
+        "ALIGN CENTER" to "<!--align:center-->\n\n<!--/align-->",
+        "ALIGN LEFT" to "<!--align:left-->\n\n<!--/align-->",
+        "ALIGN RIGHT" to "<!--align:right-->\n\n<!--/align-->"
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("INSERT MARKDOWN", style = MaterialTheme.typography.titleMedium) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("INSERTS MARKDOWN SOURCE AT THE CARET", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                blocks.forEach { (label, snippet) ->
+                    SquareButton(onClick = { onPick(snippet) }, enabled = true, filled = false) {
+                        Text(label, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                Text("ALIGNMENT MARKERS — TEXT BETWEEN THE SIGNS ALIGNS",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                alignments.forEach { (label, snippet) ->
+                    SquareButton(onClick = { onPick(snippet) }, enabled = true, filled = false) {
+                        Text(label, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
         },
-        dismissButton = { TextButton(onClick = { shareFormatDialog = false }) { Text("CANCEL") } }
-    )
-    if (pendingErase != null) AlertDialog(
-        onDismissRequest = { pendingErase = null },
-        title = { Text("Erase this note forever?") },
-        text = { Text("The note is destroyed now, without the 30-day grace period. Exported copies you saved elsewhere are untouched.") },
-        confirmButton = {
-            TextButton(onClick = { pendingErase?.let(model::deleteForever); pendingErase = null }) { Text("ERASE") }
-        },
-        dismissButton = { TextButton(onClick = { pendingErase = null }) { Text("CANCEL") } }
-    )
-    if (confirmEmptyTrash) AlertDialog(
-        onDismissRequest = { confirmEmptyTrash = false },
-        title = { Text("Empty the trash?") },
-        text = { Text("Every note in the trash is erased now. This cannot be undone.") },
-        confirmButton = {
-            TextButton(onClick = { confirmEmptyTrash = false; model.emptyTrash() }) { Text("ERASE ALL") }
-        },
-        dismissButton = { TextButton(onClick = { confirmEmptyTrash = false }) { Text("CANCEL") } }
-    )
-    if (clearDialog) AlertDialog(
-        onDismissRequest = { clearDialog = false }, title = { Text("Clear the document?") },
-        text = { Text("All text will be removed. Undo can restore it until that edit leaves the history.") },
-        confirmButton = { TextButton(onClick = { clearDialog = false; model.clear() }) { Text("CLEAR") } },
-        dismissButton = { TextButton(onClick = { clearDialog = false }) { Text("CANCEL") } }
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("CLOSE") } }
     )
 }
 
@@ -218,43 +214,6 @@ fun compactCount(value: Int): String = when {
         val tenth = (value % 1_000_000) / 100_000
         if (tenth == 0) "${m}M" else "${m}.${tenth}M"
     }
-}
-
-/**
- * Markdown insert palette. The app stays a plain-text editor (no renderer on
- * purpose), so these insert Markdown SOURCE — the exact bytes a .md file holds.
- */
-@Composable
-private fun MarkdownDialog(onDismiss: () -> Unit, onPick: (String) -> Unit) {
-    val blocks = listOf(
-        "HEADING" to "## Heading",
-        "BULLET LIST" to "- Item\n- ",
-        "NUMBERED LIST" to "1. First\n2. ",
-        "TASK LIST" to "- [ ] Todo\n- [x] Done\n",
-        "CODE" to "```\ncode\n```",
-        "QUOTE" to "> quoted text",
-        "TABLE" to "| Column A | Column B |\n| --- | --- |\n| Cell | Cell |\n",
-        "DIVIDER" to "---",
-        "LINK" to "[label](https://)"
-    )
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("INSERT MARKDOWN", style = MaterialTheme.typography.titleMedium) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("INSERTS MARKDOWN SOURCE AT THE CARET", style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                blocks.forEach { (label, snippet) ->
-                    SquareButton(onClick = { onPick(snippet) }, enabled = true, filled = false) {
-                        Text(label, style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("CLOSE") } }
-    )
 }
 
 /** Nothing-style loader: seven segments pulse in sequence. */

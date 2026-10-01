@@ -240,12 +240,12 @@ fun EditorIcon(symbol: EditorSymbol, description: String) {
         val oy = size.height / 2f
         fun fx(x: Number): Float = (x.toFloat() - MARK_CX) * s + ox
         fun fy(y: Number): Float = (y.toFloat() - MARK_CY) * s + oy
-        // The SVG set is stroke-based, but its 30-unit stroke (3% of the
-        // viewBox) renders hairline-thin in a 22dp box. Icons in this app's
-        // Material context read best at ~8% of the box; the stroke is pinned
-        // to that weight so every mark stays visibly crisp across densities.
-        val stroke = Stroke(width = 0.08f * min(size.width, size.height),
-            cap = StrokeCap.Round, join = StrokeJoin.Round)
+        // DESIGN-TRUE stroke: exactly the 30-unit weight the SVGs specify,
+        // carried through the fit transform. v1.8.1 pinned this to ~8% of
+        // the box — 2.5x the design weight — which swallowed small features
+        // (the trash X gaps, the plus arms, the folder notch) and made every
+        // mark read as crumbled. Faithful proportions render clean.
+        val stroke = Stroke(width = 30f * s, cap = StrokeCap.Round, join = StrokeJoin.Round)
 
         val paths = pathCache.getOrPut(symbol to s) {
             segmentsFor(symbol).map { buildPath(it, s, ox, oy) }
