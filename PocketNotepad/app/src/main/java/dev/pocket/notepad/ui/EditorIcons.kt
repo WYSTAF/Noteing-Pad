@@ -30,18 +30,30 @@ enum class EditorSymbol { NEW, OPEN, IMPORT, ADD, PASTE, SHARE, UNDO, REDO, CLEA
 private val AccentRed = Color(0xFFD92C35)
 
 /**
- * Design space. The marks were drawn around (512, 506); the union of all
- * geometry across the set spans 750 x 812 of the 1024 viewBox (measured from
- * the SVG sources). The first transform scaled the raw 1024 grid by a fixed
- * pixel constant, so a mark filled ~a third of the box with a 0.8 px stroke —
- * the "icons are bad" report. Fitting is now computed per draw from the real
- * canvas size: resolution-independent, optically centred on the union, and
- * the 30-unit design stroke lands at a visible ~4% of the mark.
+ * PER-ICON optical fit. Measured bounds of each symbol's geometry in the
+ * 1024 design space (union of paths, circles, lines, polygons — from the
+ * SVG sources). The earlier transform fit the union of the whole SET, so
+ * document icons filled the box while small glyphs rendered as slivers
+ * (the BACK arrow drew at 24x8 px in a 60 px box) — the toolbar read as
+ * mismatched and crumbled. Each icon now scales against its own bounds,
+ * so every mark fills the box at the same visual weight.
  */
-private const val MARK_CX = 512f
-private const val MARK_CY = 506f
-private const val MARK_SPAN = 812f       // the larger union dimension
-private const val MARK_FILL = 0.85f      // fraction of the box the union fills
+internal fun boundsFor(symbol: EditorSymbol): FloatArray = when (symbol) {
+    EditorSymbol.NEW, EditorSymbol.ADD,
+    EditorSymbol.IMPORT, EditorSymbol.OPEN, EditorSymbol.PASTE, EditorSymbol.SHARE,
+    EditorSymbol.EXPORT -> floatArrayOf(162f, 112f, 862f, 912f)
+    EditorSymbol.CLEAR, EditorSymbol.ERASE, EditorSymbol.DELETE -> floatArrayOf(137f, 100f, 887f, 899f)
+    EditorSymbol.TRASH -> floatArrayOf(174f, 162f, 874f, 900f)
+    EditorSymbol.UNDO -> floatArrayOf(329f, 318f, 695f, 646f)
+    EditorSymbol.REDO -> floatArrayOf(363f, 318f, 695f, 646f)
+    EditorSymbol.BACK -> floatArrayOf(319f, 452f, 705f, 571f)
+    EditorSymbol.NEXT -> floatArrayOf(327f, 452f, 697f, 572f)
+    EditorSymbol.MORE -> floatArrayOf(364f, 476f, 660f, 548f)
+}
+/** Fraction of the canvas the fitted mark (stroke included) occupies. */
+private const val MARK_FILL = 0.85f
+/** Half the 30-unit design stroke: bounds grow by this when fitting. */
+private const val STROKE_HALF = 15f
 
 // --- source geometry -------------------------------------------------------
 private val DOC_SHEET =
@@ -210,13 +222,13 @@ private fun segmentsFor(symbol: EditorSymbol): List<List<Seg>> =
  *  changes with canvas size/density, so every frame reuses one list. */
 private val pathCache = ConcurrentHashMap<Pair<EditorSymbol, Float>, List<Path>>()
 
-/** Design-space segments -> Path through the draw-time transform. */
-private fun buildPath(segs: List<Seg>, s: Float, ox: Float, oy: Float): Path {
+/** Design-space segments -> Path through the per-icon fit transform. */
+private fun buildPath(segs: List<Seg>, s: Float, ox: Float, oy: Float, cx0: Float, cy0: Float): Path {
     val p = Path()
     var cx = 0f
     var cy = 0f
-    fun fx(x: Float) = (x - MARK_CX) * s + ox
-    fun fy(y: Float) = (y - MARK_CY) * s + oy
+    fun fx(x: Float) = (x - cx0) * s + ox
+    fun fy(y: Float) = (y - cy0) * s + oy
     for (seg in segs) {
         when (seg.command) {
             'M' -> { cx = seg.args[0]; cy = seg.args[1]; p.moveTo(fx(cx), fy(cy)) }
@@ -235,20 +247,28 @@ private fun buildPath(segs: List<Seg>, s: Float, ox: Float, oy: Float): Path {
 fun EditorIcon(symbol: EditorSymbol, description: String) {
     val color = LocalContentColor.current
     Canvas(Modifier.size(22.dp).semantics { contentDescription = description }) {
-        val s = MARK_FILL * min(size.width, size.height) / MARK_SPAN
+        val b = boundsFor(symbol)
+        // Fit each icon's OWN bounds (half-stroke padded) into the box.
+        val w = (b[2] - b[0] + STROKE_HALF * 2)
+        val h = (b[3] - b[1] + STROKE_HALF * 2)
+        val s = MARK_FILL * min(size.width / w, size.height / h)
+        val cx0 = (b[0] + b[2]) / 2f
+        val cy0 = (b[1] + b[3]) / 2f
         val ox = size.width / 2f
         val oy = size.height / 2f
-        fun fx(x: Number): Float = (x.toFloat() - MARK_CX) * s + ox
-        fun fy(y: Number): Float = (y.toFloat() - MARK_CY) * s + oy
-        // DESIGN-TRUE stroke: exactly the 30-unit weight the SVGs specify,
-        // carried through the fit transform. v1.8.1 pinned this to ~8% of
-        // the box — 2.5x the design weight — which swallowed small features
-        // (the trash X gaps, the plus arms, the folder notch) and made every
-        // mark read as crumbled. Faithful proportions render clean.
-        val stroke = Stroke(width = 30f * s, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        fun fx(x: Number): Float = (x.toFloat() - cx0) * s + ox
+        fun fy(y: Number): Float = (y.toFloat() - cy0) * s + oy
+        // DESIGN-TRUE stroke: the SVGs' 30-unit weight carried through the
+        // per-icon fit. Uniform-weight guard: for flat glyphs (the dot rows,
+        // the arrows) a straight per-icon fit would blow the stroke up 6x —
+        // visually loud against the document icons — so the stroke is clamped
+        // to at most twice the all-icon-union weight it had in the design.
+        val unionS = MARK_FILL * min(size.width, size.height) / 812f
+        val stroke = Stroke(width = 30f * s.coerceAtMost(unionS * 2.6f),
+            cap = StrokeCap.Round, join = StrokeJoin.Round)
 
         val paths = pathCache.getOrPut(symbol to s) {
-            segmentsFor(symbol).map { buildPath(it, s, ox, oy) }
+            segmentsFor(symbol).map { buildPath(it, s, ox, oy, cx0, cy0) }
         }
         fun strokeSlot(slot: Int, c: Color = color) =
             paths.getOrNull(slot)?.let { drawPath(it, c, style = stroke) }
