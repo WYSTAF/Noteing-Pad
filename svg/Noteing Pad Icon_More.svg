@@ -5,9 +5,20 @@
       .cls-1 {
         fill: #d92c35;
       }
+
+      .cls-2 {
+        fill: none;
+        stroke: #000;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 44px;
+      }
     </style>
   </defs>
-  <circle cx="399.5" cy="512" r="35.78"/>
-  <circle class="cls-1" cx="624.5" cy="512" r="35.78"/>
-  <circle cx="512" cy="512" r="35.78"/>
+  <path class="cls-2" d="M162,212.06v599.87c0,55.26,44.77,100.06,100,100.06h500c55.23,0,100-44.8,100-100.06V112H262c-55.23,0-100,44.8-100,100.06Z"/>
+  <g>
+    <circle cx="399.5" cy="512" r="35.78"/>
+    <circle class="cls-1" cx="624.5" cy="512" r="35.78"/>
+    <circle cx="512" cy="512" r="35.78"/>
+  </g>
 </svg>

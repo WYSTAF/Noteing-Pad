@@ -54,10 +54,10 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
     // — those pokes were being coalesced/skipped on some devices, freezing the
     // numbers until the next selection change. There is no such window here.
     private val density = resources.displayMetrics.density
-    // Gutter sized for a 4-digit column ("9999") with room for the compact
-    // 10k / 10.6k / 34.8k forms beyond it — never widens past these.
-    private val gutterWidthPx = 40f * density       // band: numbers right-align here
-    private val textLeftPadPx = 56f * density       // 16dp breathing room after band
+    // Compact gutter: sized tight for a 4-digit column ("9999") with 8dp
+    // breathing room before text starts, saving horizontal screen space.
+    private val gutterWidthPx = 30f * density       // band: numbers right-align here
+    private val textLeftPadPx = 38f * density       // 8dp breathing room after band
     private val edgePadPx = 16f * density           // matches editor_view.xml padding
     private val numberPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         // Explicit init: Paint defaults to opaque BLACK, which combined with
@@ -174,49 +174,35 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
         return numberScratch
     }
 
-    /** Quintic ease-out: fast launch, long glide tail. */
-    private val quinticEaseOut = android.view.animation.Interpolator { t ->
-        val inv = 1f - t
-        1f - inv * inv * inv * inv * inv
-    }
-
     /**
-     * Scroll physics: QUINTIC fling — the v1.4.2 shape the user A/B'd against
-     * stock and kept (stock spline felt stiff). The v1.5.2+ hybrid mirrored an
-     * OverScroller into the base Scroller by calling startScroll(0,0) every
-     * frame; startScroll restarts the base clock, so the two curves fought —
-     * momentum mushed out (stiff) and the position jittered between curves,
-     * which the gutter numbers made visible as wobble. One scroller, one
-     * curve: the interpolator is handed to the base constructor, so the
-     * framework's own fling rides the quintic profile end to end.
+     * Scroll physics: Natural momentum matching the library's LazyColumn.
+     * Uses null interpolator for true physical deceleration (no artificial
+     * quintic curve that halts abruptly after launch) with reduced friction
+     * and a balanced velocity boost for a silky, effortless glide.
      */
-    private class QuinticFlingScroller(context: Context, interpolator: android.view.animation.Interpolator,
-                                      private val boost: () -> Float)
-        : Scroller(context, interpolator) {
+    private class FluidFlingScroller(context: Context, private val boost: () -> Float)
+        : Scroller(context, null) {
+        init {
+            // Cut standard friction (0.015) in half for a smooth, natural glide
+            setFriction(0.0075f)
+        }
         override fun fling(startX: Int, startY: Int, velocityX: Int, velocityY: Int,
                            minX: Int, maxX: Int, minY: Int, maxY: Int) {
-            // Boost lengthens the glide; the interpolator shapes its feel.
             super.fling(startX, startY,
                 (velocityX * boost()).toInt(), (velocityY * boost()).toInt(),
                 minX, maxX, minY, maxY)
         }
     }
 
-    /**
-     * Fixed tuning, chosen from the user's own reports (scroll that dies on
-     * release) — the on-device dials are gone. FLING_BOOST > 1 lengthens the
-     * glide; the deceleration shape is the v1.4.2 quintic the user kept.
-     */
-    private var flingBoost = 1.6f
-    private var unbufferedTouch = true
-    // 120Hz hint back ON: the user's v1.4.2 A/B verdict was "quintic fling +
-    // 120Hz hint felt right; stock felt stiff" — v1.5.x had it off.
+    private var flingBoost = 1.35f
+    // Standard VSYNC-buffered touch dispatch avoids jitter and matches LazyColumn
+    private var unbufferedTouch = false
     private var highRateHint = true
         set(value) {
             field = value
             if (!value) requestHighRate(false)   // drop any active hint immediately
         }
-    private val glideScroller = QuinticFlingScroller(context, quinticEaseOut) { flingBoost }
+    private val glideScroller = FluidFlingScroller(context) { flingBoost }
     private var wantsHighRate = false
 
     /** Frame telemetry: armed during touch/fling, reports once per gesture. */
@@ -298,18 +284,15 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
         postDelayed(disarmMeter, 150)
     }
 
-    private fun invalidateGutter() = invalidate(0, 0, textLeftPadPx.toInt(), height)
+    private fun invalidateGutter() = invalidate()
 
-    /** Redraw both side bands: line numbers (left) and scroll handle (right). */
-    private fun invalidateBands() {
-        invalidate(0, 0, textLeftPadPx.toInt(), height)
-        invalidate((width - thumbHitPx).toInt(), 0, width, height)
-    }
+    /** Redraw on scroll so gutter numbers and scroll handle update atomically with the text. */
+    private fun invalidateBands() = invalidate()
 
     override fun onScrollChanged(l: Int, t: Int, oldl: Int, oldt: Int) {
         super.onScrollChanged(l, t, oldl, oldt)
         // Keep the handle glued to reality during drag/fling/caret scrolls,
-        // and line numbers current — one region invalidate covers both bands.
+        // and line numbers current — full invalidate ensures zero frame tearing.
         if (showNumbers || currentThumbRect(thumbRectScratch)) invalidateBands()
     }
 
@@ -350,10 +333,20 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
         if (selA >= 0 && selB >= 0)
             GutterLogic.activateInto(root, starts, ends, selA, selB, count, groupActiveBuf)
         else java.util.Arrays.fill(groupActiveBuf, 0, count, false)
-        var number = if (starts[0] == 0) 1 else root.newlinesBefore(starts[0]) + 1
+        // Stable line numbering: determine the line number of the first visible
+        // logical line start, then increment deterministically. In the old logic,
+        // if starts[0] was a soft-wrapped continuation, it evaluated newlinesBefore(starts[0])
+        // and skipped incrementing, causing all visible line numbers to jump by 1
+        // every time a wrapped line scrolled past the top of the viewport.
+        var currentLineNumber = -1
         for (i in 0 until count) {
             // Soft-wrapped continuations deliberately get no number.
             if (starts[i] == 0 || root[starts[i] - 1] == '\n') {
+                if (currentLineNumber == -1) {
+                    currentLineNumber = if (starts[i] == 0) 1 else root.newlinesBefore(starts[i]) + 1
+                } else {
+                    currentLineNumber++
+                }
                 // The framework already translated this canvas by -scrollY before
                 // onDraw ran (that's why super.onDraw places text without scroll
                 // math) — subtracting scrollY again would double-shift numbers.
@@ -361,10 +354,9 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
                 val paint = if (groupActiveBuf[i]) activePaint else numberPaint
                 // CharSequence overload: the scratch StringBuilder is one, so
                 // labels cost zero fresh Strings on the scroll hot path.
-                val label = writeLineNumber(number)
+                val label = writeLineNumber(currentLineNumber)
                 canvas.drawText(label, 0, label.length,
                     gutterWidthPx, baseline.toFloat(), paint)
-                number++
             }
         }
     }

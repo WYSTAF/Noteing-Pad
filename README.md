@@ -5,10 +5,10 @@
 </p>
 
 ![Platform](https://img.shields.io/badge/android-8.0%2B-3DDC84?logo=android)
-![License](https://img.shields.io/badge/license-Apache%202.0-D92C35)
+![License](https://img.shields.io/badge/license-All%20Rights%20Reserved-D92C35)
 ![Nothing](https://img.shields.io/badge/glyph-Nothing%20GDK-111111)
 
-A plain-text notepad for Android with Nothing Glyph integration — built to be a
+A plain-text notepad for Android with Nothing Glyph integration — developed by Byteus Studio. Built to be a
 fast, focused writing surface, not a block editor. Notes stay as real text
 files on your device; nothing leaves it.
 
@@ -80,4 +80,5 @@ devices — the app runs identically everywhere, minus the lights.
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+All Rights Reserved © 2026 WYSTAF — see [LICENSE](LICENSE).
+A Byteus Studio app.

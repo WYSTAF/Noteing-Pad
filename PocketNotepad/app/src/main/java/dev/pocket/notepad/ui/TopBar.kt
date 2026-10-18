@@ -96,6 +96,11 @@ fun TopBar(
                                 " (" + dev.pocket.notepad.BuildConfig.VERSION_CODE + ")",
                             style = MaterialTheme.typography.labelMedium) },
                         onClick = {})
+                    HorizontalDivider()
+                    DropdownMenuItem(enabled = false,
+                        text = { Text("DEVELOPED BY BYTEUS STUDIO",
+                            style = MaterialTheme.typography.labelMedium) },
+                        onClick = {})
                 }
             }
         }

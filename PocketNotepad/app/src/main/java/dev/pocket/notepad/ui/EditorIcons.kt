@@ -30,65 +30,54 @@ enum class EditorSymbol { NEW, OPEN, IMPORT, ADD, PASTE, SHARE, UNDO, REDO, CLEA
 private val AccentRed = Color(0xFFD92C35)
 
 /**
- * PER-ICON optical fit. Measured bounds of each symbol's geometry in the
- * 1024 design space (union of paths, circles, lines, polygons — from the
- * SVG sources). The earlier transform fit the union of the whole SET, so
- * document icons filled the box while small glyphs rendered as slivers
- * (the BACK arrow drew at 24x8 px in a 60 px box) — the toolbar read as
- * mismatched and crumbled. Each icon now scales against its own bounds,
- * so every mark fills the box at the same visual weight.
+ * Uniform design space:
+ * All icons in the new 44px-stroke set share the 1024x1024 viewBox with
+ * uniform center (512, 512) and uniform bounding span (~844px).
+ * A single transform centers and scales all marks identically with no distortion.
  */
-internal fun boundsFor(symbol: EditorSymbol): FloatArray = when (symbol) {
-    EditorSymbol.NEW, EditorSymbol.ADD,
-    EditorSymbol.IMPORT, EditorSymbol.OPEN, EditorSymbol.PASTE, EditorSymbol.SHARE,
-    EditorSymbol.EXPORT -> floatArrayOf(162f, 112f, 862f, 912f)
-    EditorSymbol.CLEAR, EditorSymbol.ERASE, EditorSymbol.DELETE -> floatArrayOf(137f, 100f, 887f, 899f)
-    EditorSymbol.TRASH -> floatArrayOf(174f, 162f, 874f, 900f)
-    EditorSymbol.UNDO -> floatArrayOf(329f, 318f, 695f, 646f)
-    EditorSymbol.REDO -> floatArrayOf(363f, 318f, 695f, 646f)
-    EditorSymbol.BACK -> floatArrayOf(319f, 452f, 705f, 571f)
-    EditorSymbol.NEXT -> floatArrayOf(327f, 452f, 697f, 572f)
-    EditorSymbol.MORE -> floatArrayOf(364f, 476f, 660f, 548f)
-}
-/** Fraction of the canvas the fitted mark (stroke included) occupies. */
-private const val MARK_FILL = 0.85f
-/** Half the 30-unit design stroke: bounds grow by this when fitting. */
-private const val STROKE_HALF = 15f
+private const val MARK_CX = 512f
+private const val MARK_CY = 512f
+private const val MARK_SPAN = 844f
+private const val MARK_FILL = 0.88f
 
 // --- source geometry -------------------------------------------------------
 private val DOC_SHEET =
-    "M162,212.25v599.5c0,55.23,44.77,100,100,100h500c55.23,0,100-44.77,100-100v-449.5c-97.63-97.63-152.37-152.37-250-250h-350c-55.23,0-100,44.77-100,100Z"
-private val DOC_FOLD = "M612,112.25v150c0,55.23,44.77,100,100,100h150"
+    "M162,212.06v599.87c0,55.26,44.77,100.06,100,100.06h500c55.23,0,100-44.8,100-100.06v-449.78c-97.63-97.69-152.37-152.46-250-250.16h-350c-55.23,0-100,44.8-100,100.06Z"
+private val DOC_FOLD =
+    "M612,112v150.09c0,55.26,44.77,100.06,100,100.06h150"
+private val DOC_SHEET_NO_FOLD =
+    "M162,212.06v599.87c0,55.26,44.77,100.06,100,100.06h500c55.23,0,100-44.8,100-100.06V112H262c-55.23,0-100,44.8-100,100.06Z"
 private val CLIPBOARD =
-    "M686.99,161.75h75.01c55.23,0,100,44.77,100,100v550c0,55.23-44.77,100-100,100h-500c-55.23,0-100-44.77-100-100V261.75c0-55.23,44.77-100,100-100h75.01"
+    "M686.99,161.53h75.01c55.23,0,100,44.8,100,100.06v550.34c0,55.26-44.77,100.06-100,100.06h-500c-55.23,0-100-44.8-100-100.06V261.59c0-55.26,44.77-100.06,100-100.06h75.01"
 private val TRAY_LID =
-    "M250,200.12l36.19-72.46c8.47-16.95,25.78-27.66,44.73-27.66h362.31c18.87,0,36.14,10.63,44.64,27.47l36.14,71.6"
+    "M250,200.08l36.19-72.48c8.47-16.95,25.78-27.67,44.73-27.67h362.31c18.87,0,36.14,10.63,44.64,27.48l36.14,71.61"
 private val TRAY_BODY =
-    "M214.32,358.43l79,498.89c3.85,24.29,24.79,42.18,49.38,42.18h338.59c24.6,0,45.54-17.89,49.38-42.18l79-498.89c4.81-30.35-18.65-57.82-49.38-57.82h-496.58c-30.73,0-54.19,27.47-49.38,57.82Z"
-private val FOLDER_TAB = "M274.7,300.61v-49.8c0-27.61,22.39-50,50-50h151.69c27.61,0,50,22.39,50,50v49.8"
+    "M212.63,358.11l79.45,499.58c3.87,24.33,24.93,42.24,49.67,42.24h340.51c24.74,0,45.8-17.91,49.67-42.24l79.45-499.58c4.83-30.4-18.76-57.9-49.67-57.9h-499.41c-30.91,0-54.5,27.5-49.67,57.9Z"
+private val FOLDER_TAB =
+    "M274.7,300.61v-49.8c0-27.61,22.39-50,50-50h151.69c27.61,0,50,22.39,50,50v49.8"
 private val FOLDER_BODY =
-    "M174.5,200v599.5c0,55.23,44.77,100,100,100h500c55.23,0,100-44.77,100-100v-498.89c0-55.23-44.77-100-100-100h-150c-.34,0-.61-.27-.61-.61h0c0-55.23-44.77-100-100-100h-249.39c-55.23,0-100,44.77-100,100Z"
+    "M174.5,199.81v599.87c0,55.26,44.77,100.06,100,100.06h500c55.23,0,100-44.8,100-100.06v-499.2c0-55.26-44.77-100.06-100-100.06h-150c-.34,0-.61-.27-.61-.61h0c0-55.26-44.77-100.06-100-100.06h-249.39c-55.23,0-100,44.8-100,100.06Z"
 private val UNDO_ARC =
-    "M415.36,377.65h163.19c64.18,0,116.2,52.02,116.2,116.2,0,32.09-13.01,61.14-34.03,82.17-21.03,21.03-50.08,34.03-82.17,34.03h-18.27"
+    "M455.54,421.53h123.01c64.18,0,116.2,52.02,116.2,116.2,0,32.09-13.01,61.14-34.03,82.17-21.03,21.03-50.08,34.03-82.17,34.03h-18.27"
 private val REDO_ARC =
-    "M463.72,610.05h-18.27c-32.09,0-61.14-13-82.17-34.03-21.02-21.03-34.03-50.08-34.03-82.17,0-64.18,52.02-116.2,116.2-116.2h163.19"
-private val SAVE_LID = "M762,212.25v155.6c0,27.61-22.39,50-50,50h-374.1c-27.61,0-50-22.39-50-50V112.25"
+    "M463.72,653.93h-18.27c-32.09,0-61.14-13-82.17-34.03-21.02-21.03-34.03-50.08-34.03-82.17,0-64.18,52.02-116.2,116.2-116.2h123.01"
+private val SAVE_LID =
+    "M762,212.25v155.6c0,27.61-22.39,50-50,50h-374.1c-27.61,0-50-22.39-50-50V112.25"
 private val SAVE_BODY =
-    "M162,212.25v599.5c0,55.23,44.77,100,100,100h500c55.23,0,100-44.77,100-100v-499.5c-78.1-78.1-121.9-121.9-200-200h-400c-55.23,0-100,44.77-100,100Z"
-private val SAVE_SLOT = "M312.1,509.39h399.9c27.6,0,50,22.4,50,50v352.36h-499.9v-352.36c0-27.6,22.4-50,50-50Z"
+    "M162,212.06v599.87c0,55.26,44.77,100.06,100,100.06h500c55.23,0,100-44.8,100-100.06v-499.81c-78.1-78.15-121.9-121.97-200-200.13h-400c-55.23,0-100,44.8-100,100.06Z"
+private val SAVE_SLOT =
+    "M312.1,509.39h399.9c27.6,0,50,22.4,50,50v352.36h-499.9v-352.36c0-27.6,22.4-50,50-50Z"
 
 /** Per-symbol slots: stroked source paths in SVG document order. */
 internal fun sourcesFor(symbol: EditorSymbol): List<String> = when (symbol) {
     EditorSymbol.NEW, EditorSymbol.ADD -> listOf(DOC_SHEET, DOC_FOLD)
-    EditorSymbol.IMPORT, EditorSymbol.OPEN, EditorSymbol.PASTE, EditorSymbol.SHARE ->
-        listOf(CLIPBOARD)
-    EditorSymbol.UNDO -> listOf(UNDO_ARC)
-    EditorSymbol.REDO -> listOf(REDO_ARC)
+    EditorSymbol.BACK, EditorSymbol.NEXT, EditorSymbol.MORE -> listOf(DOC_SHEET_NO_FOLD)
+    EditorSymbol.UNDO -> listOf(DOC_SHEET_NO_FOLD, UNDO_ARC)
+    EditorSymbol.REDO -> listOf(DOC_SHEET_NO_FOLD, REDO_ARC)
+    EditorSymbol.IMPORT, EditorSymbol.OPEN, EditorSymbol.PASTE, EditorSymbol.SHARE -> listOf(CLIPBOARD)
     EditorSymbol.CLEAR, EditorSymbol.ERASE, EditorSymbol.DELETE -> listOf(TRAY_LID, TRAY_BODY)
     EditorSymbol.EXPORT -> listOf(SAVE_LID, SAVE_BODY, SAVE_SLOT)
     EditorSymbol.TRASH -> listOf(FOLDER_TAB, FOLDER_BODY)
-    // Pure geometry icons need no stroked source paths.
-    EditorSymbol.MORE, EditorSymbol.BACK, EditorSymbol.NEXT -> emptyList()
 }
 
 // --- parsing ---------------------------------------------------------------
@@ -110,15 +99,6 @@ internal data class Seg(
 /**
  * SVG path parser covering the command set these icons use, absolute and
  * relative (M L H V C Z), resolving relatives against a tracked cursor.
- *
- * The very first parser matched only M/L/C/Z, so a relative 'v' or 'h' was
- * never treated as a command; the number stream desynchronised and it walked
- * off the end of the token list — IndexOutOfBoundsException on the first icon
- * drawn, which killed v1.7.0 at launch.
- *
- * Total by construction: every command bounds-checks its arguments, and an
- * incomplete command ends the parse instead of throwing. `strict` is used by
- * the tests to assert no input is silently truncated.
  */
 internal fun parseSegments(d: String, strict: Boolean = false): List<Seg> {
     val tokens = Regex("[MmLlHhVvCcZz]|-?\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?")
@@ -132,9 +112,6 @@ internal fun parseSegments(d: String, strict: Boolean = false): List<Seg> {
 
     fun num(): Float = tokens[i++].toFloat()
     fun room(n: Int): Boolean = i + n <= tokens.size
-    // True when the next n tokens are numbers — a token starting with a letter
-    // is a command, so the implicit-lineto loop below must stop there rather
-    // than trying to parse "v" as a coordinate (which threw NumberFormatException).
     fun numsAhead(n: Int): Boolean {
         if (!room(n)) return false
         for (k in 0 until n) if (tokens[i + k].first().isLetter()) return false
@@ -144,8 +121,6 @@ internal fun parseSegments(d: String, strict: Boolean = false): List<Seg> {
     while (i < tokens.size) {
         val head = tokens[i]
         val isCommand = head.length == 1 && head[0].isLetter()
-        // Keep the original case: 'v' is V-relative, and the relative flag has
-        // to be read before the command is folded to upper case.
         val original = if (isCommand) head[0] else ' '
         val command = original.uppercaseChar()
         if (isCommand) i++
@@ -158,7 +133,6 @@ internal fun parseSegments(d: String, strict: Boolean = false): List<Seg> {
                 cy = if (relative) cy + y else y
                 subX = cx; subY = cy
                 out += Seg('M', floatArrayOf(cx, cy))
-                // Per SVG, extra pairs after a moveto are implicit linetos.
                 while (numsAhead(2)) {
                     val lx = num(); val ly = num()
                     cx += lx; cy += ly
@@ -198,12 +172,10 @@ internal fun parseSegments(d: String, strict: Boolean = false): List<Seg> {
                 cx = ex; cy = ey
             }
             'Z' -> { out += Seg('Z', FloatArray(0)); cx = subX; cy = subY }
-            // Not used by this icon set; consume arguments so the stream cannot
-            // desynchronise if one ever is.
             'S', 'Q' -> { if (!room(4)) return out; num(); num(); num(); num() }
             'T' -> { if (!room(2)) return out; num(); num() }
             'A' -> { if (!room(7)) return out; repeat(7) { num() } }
-            else -> if (!isCommand) i++   // stray number with no command
+            else -> if (!isCommand) i++
         }
     }
     return out
@@ -211,24 +183,19 @@ internal fun parseSegments(d: String, strict: Boolean = false): List<Seg> {
 
 // --- caching + rendering ---------------------------------------------------
 
-/** Geometry parsed once per symbol, kept in DESIGN space (untransformed):
- *  the transform depends on the canvas size, which is only known at draw. */
 private val segCache = ConcurrentHashMap<EditorSymbol, List<List<Seg>>>()
 
 private fun segmentsFor(symbol: EditorSymbol): List<List<Seg>> =
     segCache.getOrPut(symbol) { sourcesFor(symbol).map { parseSegments(it) } }
 
-/** Transformed paths, memoised per symbol AND scale. The scale key only
- *  changes with canvas size/density, so every frame reuses one list. */
 private val pathCache = ConcurrentHashMap<Pair<EditorSymbol, Float>, List<Path>>()
 
-/** Design-space segments -> Path through the per-icon fit transform. */
-private fun buildPath(segs: List<Seg>, s: Float, ox: Float, oy: Float, cx0: Float, cy0: Float): Path {
+private fun buildPath(segs: List<Seg>, s: Float, ox: Float, oy: Float): Path {
     val p = Path()
     var cx = 0f
     var cy = 0f
-    fun fx(x: Float) = (x - cx0) * s + ox
-    fun fy(y: Float) = (y - cy0) * s + oy
+    fun fx(x: Float) = (x - MARK_CX) * s + ox
+    fun fy(y: Float) = (y - MARK_CY) * s + oy
     for (seg in segs) {
         when (seg.command) {
             'M' -> { cx = seg.args[0]; cy = seg.args[1]; p.moveTo(fx(cx), fy(cy)) }
@@ -247,28 +214,15 @@ private fun buildPath(segs: List<Seg>, s: Float, ox: Float, oy: Float, cx0: Floa
 fun EditorIcon(symbol: EditorSymbol, description: String) {
     val color = LocalContentColor.current
     Canvas(Modifier.size(22.dp).semantics { contentDescription = description }) {
-        val b = boundsFor(symbol)
-        // Fit each icon's OWN bounds (half-stroke padded) into the box.
-        val w = (b[2] - b[0] + STROKE_HALF * 2)
-        val h = (b[3] - b[1] + STROKE_HALF * 2)
-        val s = MARK_FILL * min(size.width / w, size.height / h)
-        val cx0 = (b[0] + b[2]) / 2f
-        val cy0 = (b[1] + b[3]) / 2f
+        val s = MARK_FILL * min(size.width, size.height) / MARK_SPAN
         val ox = size.width / 2f
         val oy = size.height / 2f
-        fun fx(x: Number): Float = (x.toFloat() - cx0) * s + ox
-        fun fy(y: Number): Float = (y.toFloat() - cy0) * s + oy
-        // DESIGN-TRUE stroke: the SVGs' 30-unit weight carried through the
-        // per-icon fit. Uniform-weight guard: for flat glyphs (the dot rows,
-        // the arrows) a straight per-icon fit would blow the stroke up 6x —
-        // visually loud against the document icons — so the stroke is clamped
-        // to at most twice the all-icon-union weight it had in the design.
-        val unionS = MARK_FILL * min(size.width, size.height) / 812f
-        val stroke = Stroke(width = 30f * s.coerceAtMost(unionS * 2.6f),
-            cap = StrokeCap.Round, join = StrokeJoin.Round)
+        fun fx(x: Number): Float = (x.toFloat() - MARK_CX) * s + ox
+        fun fy(y: Number): Float = (y.toFloat() - MARK_CY) * s + oy
+        val stroke = Stroke(width = 44f * s, cap = StrokeCap.Round, join = StrokeJoin.Round)
 
         val paths = pathCache.getOrPut(symbol to s) {
-            segmentsFor(symbol).map { buildPath(it, s, ox, oy, cx0, cy0) }
+            segmentsFor(symbol).map { buildPath(it, s, ox, oy) }
         }
         fun strokeSlot(slot: Int, c: Color = color) =
             paths.getOrNull(slot)?.let { drawPath(it, c, style = stroke) }
@@ -276,8 +230,6 @@ fun EditorIcon(symbol: EditorSymbol, description: String) {
             drawLine(c, Offset(fx(x1), fy(y1)), Offset(fx(x2), fy(y2)), stroke.width, StrokeCap.Round)
         fun dot(cx: Number, cy: Number, r: Number, c: Color) =
             drawCircle(c, radius = r.toFloat() * s, center = Offset(fx(cx), fy(cy)))
-        // STROKED rounded outline (SVG rects: fill:none, stroke 30). The first
-        // port filled these solid, turning clips and folder fronts into blobs.
         fun outlineBox(x: Number, y: Number, w: Number, h: Number, r: Number, c: Color = color) =
             drawRoundRect(c, topLeft = Offset(fx(x), fy(y)),
                 size = Size(w.toFloat() * s, h.toFloat() * s),
@@ -296,22 +248,17 @@ fun EditorIcon(symbol: EditorSymbol, description: String) {
             if (close) p.close()
             return p
         }
-        // Filled closed polygon (SVG polygon: filled arrowheads/tips).
         fun fillPoly(points: String, c: Color) = drawPath(polyPath(points, close = true), c)
-        // Open STROKED polyline (SVG polyline: the import/share trays). Must
-        // NOT close — a closing edge would stroke a line the design omits.
         fun strokePoly(points: String, c: Color = color) =
             drawPath(polyPath(points, close = false), c, style = stroke)
 
         when (symbol) {
-            // Sheet with a plus; the horizontal arm of the + is red.
             EditorSymbol.NEW -> {
                 strokeSlot(0); strokeSlot(1)
-                line(512, 621.3, 512, 561.75)
-                line(512, 761.75, 512, 701.9)
-                line(412, 661.75, 612, 661.75, AccentRed)
+                line(512, 588.8, 512, 504.58)
+                line(512, 787.42, 512, 702.78)
+                line(370.58, 646, 653.42, 646, AccentRed)
             }
-            // Sheet with a 3x2 dot block (markdown insert).
             EditorSymbol.ADD -> {
                 strokeSlot(0); strokeSlot(1)
                 dot(399.5, 628.97, 35.78, color)
@@ -321,83 +268,73 @@ fun EditorIcon(symbol: EditorSymbol, description: String) {
                 dot(624.5, 741.47, 35.78, color)
                 dot(399.5, 741.47, 35.78, color)
             }
-            // Clipboard with a red down arrow (import / open a file).
-            EditorSymbol.IMPORT, EditorSymbol.OPEN -> {
-                strokeSlot(0)                                  // clipboard outline
-                outlineBox(337, 112.25, 350, 100, 50)         // clip pill: stroked
-                strokePoly("412 661.75 412 762.25 612 762.25 612 661.75")  // open tray
-                line(512, 623.75, 512, 524.25, AccentRed)      // arrow shaft
-                fillPoly("457.33 616.42 566.67 616.42 512 671.07 457.33 616.42", AccentRed)
-            }
-            // Clipboard with three rules, the middle one red.
-            EditorSymbol.PASTE -> {
+            EditorSymbol.BACK -> {
                 strokeSlot(0)
-                outlineBox(337, 112.25, 350, 100, 50)
-                line(412, 661.75, 612, 661.75)
-                line(412, 562.25, 612, 562.25, AccentRed)
-                line(412, 762.25, 612, 762.25)
+                line(445.39, 511.36, 568.39, 511.36)
+                fillPoly("471.06 599.12 319.09 511.37 471.06 423.61 471.06 599.12", color)
+                dot(669.13, 512, 35.78, AccentRed)
             }
-            // Clipboard with a red up arrow (share the note as a file).
-            EditorSymbol.SHARE -> {
+            EditorSymbol.NEXT -> {
                 strokeSlot(0)
-                outlineBox(337, 112.25, 350, 100, 50)
-                strokePoly("412 661.75 412 762.25 612 762.25 612 661.75")
-                line(512, 661.75, 512, 562.25, AccentRed)
-                fillPoly("457.33 569.58 566.67 569.58 512 514.93 457.33 569.58", AccentRed)
+                line(326.57, 512, 449.58, 512)
+                fillPoly("423.91 599.76 575.88 512.01 423.91 424.25 423.91 599.76", color)
+                dot(661.65, 512, 35.78, AccentRed)
             }
-            EditorSymbol.UNDO -> {
-                strokeSlot(0)
-                fillPoly("432.87 437.49 329.25 377.66 432.87 317.82 432.87 437.49", color)
-                dot(459.52, 610.58, 35.78, AccentRed)
-            }
-            EditorSymbol.REDO -> {
-                strokeSlot(0)
-                fillPoly("591.13 437.49 694.75 377.66 591.13 317.82 591.13 437.49", color)
-                dot(564.48, 610.57, 35.78, AccentRed)
-            }
-            // Tray with an X; one stroke of the X is red.
-            EditorSymbol.CLEAR, EditorSymbol.ERASE, EditorSymbol.DELETE -> {
-                strokeSlot(0); strokeSlot(1)
-                line(483.4, 620.9, 441.29, 578.79)
-                line(582.71, 720.21, 540.39, 677.89)
-                line(441.29, 720.21, 582.71, 578.79, AccentRed)
-                line(137, 200.12, 887, 200.12)
-            }
-            // Floppy: save-as / export. Shutter is a STROKED red outline
-            // (SVG rect cls-1), not the solid slab the first port drew.
-            EditorSymbol.EXPORT -> {
-                strokeSlot(0); strokeSlot(1); strokeSlot(2)
-                outlineBox(347.58, 200.61, 100, 161.64, 0f, AccentRed)
-            }
-            // Three dots, the middle one red.
             EditorSymbol.MORE -> {
+                strokeSlot(0)
                 dot(399.5, 512, 35.78, color)
                 dot(624.5, 512, 35.78, AccentRed)
                 dot(512, 512, 35.78, color)
             }
-            // Left arrow with a red dot (back to library).
-            EditorSymbol.BACK -> {
-                line(405.2, 511.36, 568.39, 511.36)
-                fillPoly("422.71 571.2 319.09 511.37 422.71 451.53 422.71 571.2", color)
-                dot(669.13, 512, 35.78, AccentRed)
+            EditorSymbol.UNDO -> {
+                strokeSlot(0); strokeSlot(1)
+                fillPoly("481.22 509.28 329.25 421.53 481.22 333.77 481.22 509.28", color)
+                dot(459.52, 654.45, 35.78, AccentRed)
             }
-            // Right arrow with a red dot (restore from trash). Shaft is
-            // BLACK in the source (cls-1 in this file's stylesheet), not red.
-            EditorSymbol.NEXT -> {
-                line(326.57, 512, 489.77, 512)
-                fillPoly("472.26 571.84 575.88 512.01 472.26 452.17 472.26 571.84", color)
-                dot(661.65, 512, 35.78, AccentRed)
+            EditorSymbol.REDO -> {
+                strokeSlot(0); strokeSlot(1)
+                fillPoly("542.78 509.28 694.75 421.53 542.78 333.77 542.78 509.28", color)
+                dot(564.48, 654.45, 35.78, AccentRed)
             }
-            // Folder with an X (trash). Folder TAB is RED in the source
-            // (cls-1 in this file's stylesheet); the front is a stroked
-            // rounded outline, not the solid blob the first port drew.
+            EditorSymbol.IMPORT, EditorSymbol.OPEN -> {
+                strokeSlot(0)
+                outlineBox(337, 112, 350, 100.06, 50)
+                strokePoly("412 661.84 412 762.41 612 762.41 612 661.84")
+                line(512, 623.82, 512, 514.75, AccentRed)
+                fillPoly("431.81 613.07 592.18 613.07 512.01 693.22 431.81 613.07", AccentRed)
+            }
+            EditorSymbol.PASTE -> {
+                strokeSlot(0)
+                outlineBox(337, 112, 350, 100.06, 50)
+                line(412, 661.84, 612, 661.84)
+                line(412, 562.28, 612, 562.28, AccentRed)
+                line(412, 762.41, 612, 762.41)
+            }
+            EditorSymbol.SHARE -> {
+                strokeSlot(0)
+                outlineBox(337, 112, 350, 100.06, 50)
+                strokePoly("412.06 661.84 412.06 762.34 611.94 762.34 611.94 661.84")
+                line(512, 661.84, 512, 562.34, AccentRed)
+                fillPoly("431.81 573.09 592.18 573.09 512.01 492.94 431.81 573.09", AccentRed)
+            }
+            EditorSymbol.CLEAR, EditorSymbol.ERASE, EditorSymbol.DELETE -> {
+                strokeSlot(0); strokeSlot(1)
+                line(471.55, 609.05, 412, 549.5)
+                line(612, 749.5, 552.15, 689.65)
+                line(412, 749.5, 612, 549.5, AccentRed)
+                line(162, 200.08, 862, 200.08)
+            }
+            EditorSymbol.EXPORT -> {
+                strokeSlot(0); strokeSlot(1); strokeSlot(2)
+                outlineBox(371.92, 195.86, 100, 138.44, 0, AccentRed)
+            }
             EditorSymbol.TRASH -> {
                 strokeSlot(0, AccentRed)
                 strokeSlot(1)
                 outlineBox(174.5, 300.61, 700, 598.89, 100)
-                line(483.4, 617.4, 441.29, 575.29)
-                line(582.71, 716.71, 540.39, 674.39)
-                line(441.29, 716.71, 582.71, 575.29, AccentRed)
+                line(471.55, 605.55, 412, 546)
+                line(612, 746, 552.15, 686.15)
+                line(412, 746, 612, 546, AccentRed)
             }
         }
     }
