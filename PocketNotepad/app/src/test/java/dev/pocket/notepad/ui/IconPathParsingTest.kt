@@ -67,4 +67,27 @@ class IconPathParsingTest {
         val afterClose = segs.last { it.command == 'H' && it.args[0] == 110f }
         assertEquals(110f, afterClose.args[0], 0.01f)
     }
+
+    @Test
+    fun leadingDotDecimalsAreParsedCorrectly() {
+        // Tests numbers like -.34, -.61 without leading digit 0
+        val segs = parseSegments("M0,0c-.34,0-.61-.27-.61-.61", strict = true)
+        assertEquals(2, segs.size)
+        assertEquals('C', segs[1].command)
+        assertEquals(-0.34f, segs[1].args[0], 0.001f)
+        assertEquals(-0.61f, segs[1].args[4], 0.001f)
+        assertEquals(-0.61f, segs[1].args[5], 0.001f)
+    }
+
+    @Test
+    fun consecutiveBezierCoordinatesAreParsed() {
+        // Tests multiple 6-tuples under single 'c' command (e.g. 18 numbers in UNDO/REDO)
+        val segs = parseSegments("M0,0c1,2,3,4,5,6 7,8,9,10,11,12", strict = true)
+        assertEquals(3, segs.size)
+        assertEquals('M', segs[0].command)
+        assertEquals('C', segs[1].command)
+        assertEquals('C', segs[2].command)
+        assertEquals(5f, segs[1].args[4], 0.01f)
+        assertEquals(16f, segs[2].args[4], 0.01f) // 5 + 11
+    }
 }

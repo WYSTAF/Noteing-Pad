@@ -12,6 +12,7 @@ import android.text.InputFilter
 import android.text.Layout
 import android.text.TextWatcher
 import android.util.AttributeSet
+import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -20,7 +21,7 @@ import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.Scroller
+import android.widget.OverScroller
 import android.widget.TextView
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -175,34 +176,20 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
     }
 
     /**
-     * Scroll physics: Natural momentum matching the library's LazyColumn.
-     * Uses null interpolator for true physical deceleration (no artificial
-     * quintic curve that halts abruptly after launch) with reduced friction
-     * and a balanced velocity boost for a silky, effortless glide.
+     * Scroll physics: True momentum fling matching the library's LazyColumn.
+     * Android framework's TextView/EditText does NOT call fling on touch events;
+     * its Touch.onTouchEvent only handles 1:1 dragging and stops dead on release.
+     * We use a GestureDetector to capture user fling gestures on touch release
+     * and drive OverScroller along Android's native spline deceleration curve,
+     * stepping computeScroll() on every VSYNC frame.
      */
-    private class FluidFlingScroller(context: Context, private val boost: () -> Float)
-        : Scroller(context, null) {
-        init {
-            // Cut standard friction (0.015) in half for a smooth, natural glide
-            setFriction(0.0075f)
-        }
-        override fun fling(startX: Int, startY: Int, velocityX: Int, velocityY: Int,
-                           minX: Int, maxX: Int, minY: Int, maxY: Int) {
-            super.fling(startX, startY,
-                (velocityX * boost()).toInt(), (velocityY * boost()).toInt(),
-                minX, maxX, minY, maxY)
-        }
-    }
-
-    private var flingBoost = 1.35f
-    // Standard VSYNC-buffered touch dispatch avoids jitter and matches LazyColumn
-    private var unbufferedTouch = false
+    private val overScroller = OverScroller(context)
+    private var unbufferedTouch = true
     private var highRateHint = true
         set(value) {
             field = value
             if (!value) requestHighRate(false)   // drop any active hint immediately
         }
-    private val glideScroller = FluidFlingScroller(context) { flingBoost }
     private var wantsHighRate = false
 
     /** Frame telemetry: armed during touch/fling, reports once per gesture. */
@@ -213,11 +200,35 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
         onScrollStats?.invoke(frameHealth.fps, frameHealth.longFrames)
     }
 
-    init {
-        setScroller(glideScroller)
-    }
+    private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onDown(e: MotionEvent): Boolean {
+            if (!overScroller.isFinished) {
+                overScroller.abortAnimation()
+            }
+            return false
+        }
 
-    fun cancelGlide() = glideScroller.abortAnimation()
+        override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
+            if (scrubbingThumb) return false
+            val textLayout = layout ?: return false
+            val maxScrollY = (textLayout.height + totalPaddingTop + totalPaddingBottom - height).coerceAtLeast(0)
+            if (maxScrollY <= 0) return false
+
+            frameHealth.setArmed(true)
+            if (highRateHint) requestHighRate(true)
+            // In Android, a downward finger swipe produces positive velocityY (scrolling up toward 0),
+            // while an upward finger swipe produces negative velocityY (scrolling down toward maxScrollY).
+            overScroller.fling(0, scrollY, 0, -velocityY.toInt(), 0, 0, 0, maxScrollY)
+            postInvalidateOnAnimation()
+            return true
+        }
+    })
+
+    fun cancelGlide() {
+        if (!overScroller.isFinished) {
+            overScroller.abortAnimation()
+        }
+    }
 
     private fun requestHighRate(active: Boolean) {
         if (Build.VERSION.SDK_INT < 35 || active == wantsHighRate) return
@@ -227,24 +238,31 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
 
     override fun computeScroll() {
         super.computeScroll()
-        // Glide ended inside this call; with no finger down, let the panel idle
-        // and report the gesture's frame health once.
-        if (glideScroller.isFinished && !isPressed && !isHovered) {
-            requestHighRate(false)
-            scheduleDisarm()
+        if (overScroller.computeScrollOffset()) {
+            val currY = overScroller.currY
+            if (scrollY != currY) {
+                scrollTo(0, currY)
+            }
+            postInvalidateOnAnimation()
+        } else {
+            if (!isPressed && !isHovered && !scrubbingThumb) {
+                requestHighRate(false)
+                scheduleDisarm()
+            }
         }
     }
 
     /**
-     * Observational touch override: unbuffered drag + refresh-rate hint only,
-     * both switchable. Clicks/caret still go to EditText (super), so no custom
-     * performClick path exists and the accessibility lint heuristic does not
-     * apply.
+     * Observational touch override: unbuffered drag + gesture fling integration.
+     * Clicks/caret still go to EditText (super), so no custom performClick path exists.
      */
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                if (!overScroller.isFinished) {
+                    overScroller.abortAnimation()
+                }
                 // Handle strip first: a grab here must never place the caret.
                 if (event.x >= width - thumbHitPx && currentThumbRect(thumbRectScratch)) {
                     scrubbingThumb = true
@@ -268,13 +286,17 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
             }
             MotionEvent.ACTION_UP -> {
                 if (scrubbingThumb) { scrubbingThumb = false; invalidateBands(); scheduleDisarm(); return true }
-                if (glideScroller.isFinished) { requestHighRate(false); scheduleDisarm() }
             }
             MotionEvent.ACTION_CANCEL -> {
                 scrubbingThumb = false
-                requestHighRate(false); scheduleDisarm()
+                if (!overScroller.isFinished) {
+                    overScroller.abortAnimation()
+                }
+                requestHighRate(false)
+                scheduleDisarm()
             }
         }
+        gestureDetector.onTouchEvent(event)
         return super.onTouchEvent(event)
     }
 

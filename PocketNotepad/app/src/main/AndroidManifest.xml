@@ -7,6 +7,9 @@
          the app keeps its own minSdk 26 rather than excluding older phones. -->
     <uses-permission android:name="com.nothing.ketchum.permission.ENABLE" />
     <uses-sdk tools:overrideLibrary="com.nothing.thirdparty" />
+    <queries>
+        <package android:name="com.nothing.thirdparty" />
+    </queries>
     <application android:allowBackup="false" android:supportsRtl="true"
         android:label="@string/app_name" android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher" android:theme="@style/Theme.PocketNotepad">

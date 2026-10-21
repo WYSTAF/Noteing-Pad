@@ -60,6 +60,16 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
             saveRequests.filterNotNull().debounce(700).collectLatest { persist(it) }
         }
         viewModelScope.launch {
+            GlyphSupport.availableFlow.collect { isAvail ->
+                _ui.update {
+                    it.copy(
+                        glyph = preferences.getBoolean("glyph", true) && isAvail,
+                        glyphAvailable = isAvail
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
             try {
                 GlyphSupport.init(getApplication())
                 GlyphSupport.setEnabled(preferences.getBoolean("glyph", true))

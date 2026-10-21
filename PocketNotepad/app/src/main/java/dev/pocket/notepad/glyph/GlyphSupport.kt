@@ -45,6 +45,8 @@ object GlyphSupport {
     @Volatile var available: Boolean = false        // device actually supports it
         private set
 
+    val availableFlow = kotlinx.coroutines.flow.MutableStateFlow(false)
+
     private var glyphManager: GlyphManager? = null
     private var matrixManager: GlyphMatrixManager? = null
     private var sessionOpen = false
@@ -74,35 +76,51 @@ object GlyphSupport {
             val app = context.applicationContext
             if (hardware == Hardware.INTERFACE) {
                 val manager = GlyphManager.getInstance(app)
+                glyphManager = manager
                 manager.init(object : GlyphManager.Callback {
                     override fun onServiceConnected(name: android.content.ComponentName?) {
                         Log.i(TAG, "glyph service connected")
+                        val reg = runCatching { manager.register() }.getOrDefault(false)
+                        Log.i(TAG, "glyph registered=$reg")
+                        available = reg
+                        availableFlow.value = reg
                     }
                     override fun onServiceDisconnected(name: android.content.ComponentName?) {
                         Log.w(TAG, "glyph service disconnected")
                         available = false
+                        availableFlow.value = false
+                        sessionOpen = false
                     }
                 })
-                glyphManager = manager
-                available = runCatching { manager.register(DEBUG_KEY) }.getOrDefault(false)
             } else {
                 val manager = GlyphMatrixManager.getInstance(app)
+                matrixManager = manager
                 manager.init(object : GlyphMatrixManager.Callback {
                     override fun onServiceConnected(name: android.content.ComponentName?) {
                         Log.i(TAG, "matrix service connected")
+                        val dev = when {
+                            Common.is25111() -> "25111"
+                            Common.is25111p() -> "25111p"
+                            Common.is25131() -> "25131"
+                            else -> android.os.Build.MODEL
+                        }
+                        val reg = runCatching { manager.register(dev) }.getOrDefault(false)
+                        Log.i(TAG, "matrix registered=$reg")
+                        available = reg
+                        availableFlow.value = reg
                     }
                     override fun onServiceDisconnected(name: android.content.ComponentName?) {
                         Log.w(TAG, "matrix service disconnected")
                         available = false
+                        availableFlow.value = false
                     }
                 })
-                matrixManager = manager
-                available = runCatching { manager.register(DEBUG_KEY) }.getOrDefault(false)
             }
-            Log.i(TAG, "hardware=$hardware zones=$zones available=$available")
+            Log.i(TAG, "hardware=$hardware zones=$zones")
         } catch (failure: Throwable) {
             Log.w(TAG, "glyph unavailable: ${failure.message}")
             available = false
+            availableFlow.value = false
         }
     }
 
@@ -110,24 +128,23 @@ object GlyphSupport {
 
     private inline fun session(block: () -> Unit) {
         if (!available || !enabled) return
-        var opened = false
         try {
             if (hardware == Hardware.INTERFACE && !sessionOpen) {
-                glyphManager?.openSession(); sessionOpen = true; opened = true
+                glyphManager?.openSession()
+                sessionOpen = true
             }
             block()
         } catch (failure: Throwable) {
             Log.w(TAG, "glyph op: ${failure.message}")
-        } finally {
-            if (opened) {
-                sessionOpen = false
-                runCatching { glyphManager?.closeSession() }
-            }
         }
     }
 
     fun turnOff() {
         runCatching {
+            if (sessionOpen) {
+                sessionOpen = false
+                glyphManager?.closeSession()
+            }
             when (hardware) {
                 Hardware.INTERFACE -> glyphManager?.turnOff()
                 Hardware.MATRIX -> matrixManager?.turnOff()

@@ -143,6 +143,48 @@ fun EditorScreen(model: NotepadViewModel) {
         exportDialog = false
         model.prepareExport(spec)
     }
+    if (shareFormatDialog) AlertDialog(
+        onDismissRequest = { shareFormatDialog = false },
+        title = { Text("SHARE FORMAT", style = MaterialTheme.typography.titleMedium) },
+        text = { Text("The note is sent as a real file, not pasted text. Choose the format:") },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                SquareButton(onClick = { shareFormatDialog = false; model.shareFile("txt") },
+                    enabled = true, filled = false) { Text("TXT", style = MaterialTheme.typography.labelSmall) }
+                SquareButton(onClick = { shareFormatDialog = false; model.shareFile("md") },
+                    enabled = true, filled = false) { Text("MD", style = MaterialTheme.typography.labelSmall) }
+                SquareButton(onClick = { shareFormatDialog = false; model.shareFile("pdf") },
+                    enabled = true, filled = false) { Text("PDF", style = MaterialTheme.typography.labelSmall) }
+            }
+        },
+        dismissButton = { TextButton(onClick = { shareFormatDialog = false }) { Text("CANCEL") } }
+    )
+    if (markdownDialog) MarkdownDialog({ markdownDialog = false }) { snippet ->
+        markdownDialog = false
+        model.insertMarkdown(snippet)
+    }
+    if (renameDialog) RenameDialog(state.title, { renameDialog = false }) { name ->
+        renameDialog = false
+        model.renameNote(name)
+    }
+    if (pendingErase != null) AlertDialog(
+        onDismissRequest = { pendingErase = null },
+        title = { Text("Erase this note forever?") },
+        text = { Text("The note is destroyed now, without the 30-day grace period. Exported copies you saved elsewhere are untouched.") },
+        confirmButton = {
+            TextButton(onClick = { pendingErase?.let(model::deleteForever); pendingErase = null }) { Text("ERASE") }
+        },
+        dismissButton = { TextButton(onClick = { pendingErase = null }) { Text("CANCEL") } }
+    )
+    if (confirmEmptyTrash) AlertDialog(
+        onDismissRequest = { confirmEmptyTrash = false },
+        title = { Text("Empty the trash?") },
+        text = { Text("Every note in the trash is erased now. This cannot be undone.") },
+        confirmButton = {
+            TextButton(onClick = { confirmEmptyTrash = false; model.emptyTrash() }) { Text("ERASE ALL") }
+        },
+        dismissButton = { TextButton(onClick = { confirmEmptyTrash = false }) { Text("CANCEL") } }
+    )
 }
 
 /**

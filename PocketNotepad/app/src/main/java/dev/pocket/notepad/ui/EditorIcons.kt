@@ -101,7 +101,7 @@ internal data class Seg(
  * relative (M L H V C Z), resolving relatives against a tracked cursor.
  */
 internal fun parseSegments(d: String, strict: Boolean = false): List<Seg> {
-    val tokens = Regex("[MmLlHhVvCcZz]|-?\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?")
+    val tokens = Regex("[MmLlHhVvCcZz]|-?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[eE][-+]?\\d+)?")
         .findAll(d.trim()).map { it.value }.toList()
     val out = ArrayList<Seg>()
     var i = 0
@@ -160,16 +160,19 @@ internal fun parseSegments(d: String, strict: Boolean = false): List<Seg> {
             }
             'C' -> {
                 if (!room(6)) { if (strict) error("truncated curveto") else return out }
-                val x1 = num(); val y1 = num(); val x2 = num(); val y2 = num()
-                val x3 = num(); val y3 = num()
-                val ax = if (relative) cx + x1 else x1
-                val ay = if (relative) cy + y1 else y1
-                val bx = if (relative) cx + x2 else x2
-                val by = if (relative) cy + y2 else y2
-                val ex = if (relative) cx + x3 else x3
-                val ey = if (relative) cy + y3 else y3
-                out += Seg('C', floatArrayOf(ax, ay, bx, by, ex, ey))
-                cx = ex; cy = ey
+                do {
+                    val x1 = num(); val y1 = num()
+                    val x2 = num(); val y2 = num()
+                    val x3 = num(); val y3 = num()
+                    val ax = if (relative) cx + x1 else x1
+                    val ay = if (relative) cy + y1 else y1
+                    val bx = if (relative) cx + x2 else x2
+                    val by = if (relative) cy + y2 else y2
+                    val ex = if (relative) cx + x3 else x3
+                    val ey = if (relative) cy + y3 else y3
+                    out += Seg('C', floatArrayOf(ax, ay, bx, by, ex, ey))
+                    cx = ex; cy = ey
+                } while (numsAhead(6))
             }
             'Z' -> { out += Seg('Z', FloatArray(0)); cx = subX; cy = subY }
             'S', 'Q' -> { if (!room(4)) return out; num(); num(); num(); num() }
@@ -202,8 +205,12 @@ private fun buildPath(segs: List<Seg>, s: Float, ox: Float, oy: Float): Path {
             'L' -> { cx = seg.args[0]; cy = seg.args[1]; p.lineTo(fx(cx), fy(cy)) }
             'H' -> { cx = seg.args[0]; p.lineTo(fx(cx), fy(cy)) }
             'V' -> { cy = seg.args[0]; p.lineTo(fx(cx), fy(cy)) }
-            'C' -> p.cubicTo(fx(seg.args[0]), fy(seg.args[1]), fx(seg.args[2]), fy(seg.args[3]),
-                fx(seg.args[4]), fy(seg.args[5]))
+            'C' -> {
+                p.cubicTo(fx(seg.args[0]), fy(seg.args[1]), fx(seg.args[2]), fy(seg.args[3]),
+                    fx(seg.args[4]), fy(seg.args[5]))
+                cx = seg.args[4]
+                cy = seg.args[5]
+            }
             'Z' -> p.close()
         }
     }
@@ -213,6 +220,7 @@ private fun buildPath(segs: List<Seg>, s: Float, ox: Float, oy: Float): Path {
 @Composable
 fun EditorIcon(symbol: EditorSymbol, description: String) {
     val color = LocalContentColor.current
+    val accent = if (color == Color.White) Color.White else AccentRed
     Canvas(Modifier.size(22.dp).semantics { contentDescription = description }) {
         val s = MARK_FILL * min(size.width, size.height) / MARK_SPAN
         val ox = size.width / 2f
@@ -257,12 +265,12 @@ fun EditorIcon(symbol: EditorSymbol, description: String) {
                 strokeSlot(0); strokeSlot(1)
                 line(512, 588.8, 512, 504.58)
                 line(512, 787.42, 512, 702.78)
-                line(370.58, 646, 653.42, 646, AccentRed)
+                line(370.58, 646, 653.42, 646, accent)
             }
             EditorSymbol.ADD -> {
                 strokeSlot(0); strokeSlot(1)
                 dot(399.5, 628.97, 35.78, color)
-                dot(624.5, 628.97, 35.78, AccentRed)
+                dot(624.5, 628.97, 35.78, accent)
                 dot(512, 628.97, 35.78, color)
                 dot(512, 741.47, 35.78, color)
                 dot(624.5, 741.47, 35.78, color)
@@ -272,69 +280,69 @@ fun EditorIcon(symbol: EditorSymbol, description: String) {
                 strokeSlot(0)
                 line(445.39, 511.36, 568.39, 511.36)
                 fillPoly("471.06 599.12 319.09 511.37 471.06 423.61 471.06 599.12", color)
-                dot(669.13, 512, 35.78, AccentRed)
+                dot(669.13, 512, 35.78, accent)
             }
             EditorSymbol.NEXT -> {
                 strokeSlot(0)
                 line(326.57, 512, 449.58, 512)
                 fillPoly("423.91 599.76 575.88 512.01 423.91 424.25 423.91 599.76", color)
-                dot(661.65, 512, 35.78, AccentRed)
+                dot(661.65, 512, 35.78, accent)
             }
             EditorSymbol.MORE -> {
                 strokeSlot(0)
                 dot(399.5, 512, 35.78, color)
-                dot(624.5, 512, 35.78, AccentRed)
+                dot(624.5, 512, 35.78, accent)
                 dot(512, 512, 35.78, color)
             }
             EditorSymbol.UNDO -> {
                 strokeSlot(0); strokeSlot(1)
                 fillPoly("481.22 509.28 329.25 421.53 481.22 333.77 481.22 509.28", color)
-                dot(459.52, 654.45, 35.78, AccentRed)
+                dot(459.52, 654.45, 35.78, accent)
             }
             EditorSymbol.REDO -> {
                 strokeSlot(0); strokeSlot(1)
                 fillPoly("542.78 509.28 694.75 421.53 542.78 333.77 542.78 509.28", color)
-                dot(564.48, 654.45, 35.78, AccentRed)
+                dot(564.48, 654.45, 35.78, accent)
             }
             EditorSymbol.IMPORT, EditorSymbol.OPEN -> {
                 strokeSlot(0)
                 outlineBox(337, 112, 350, 100.06, 50)
                 strokePoly("412 661.84 412 762.41 612 762.41 612 661.84")
-                line(512, 623.82, 512, 514.75, AccentRed)
-                fillPoly("431.81 613.07 592.18 613.07 512.01 693.22 431.81 613.07", AccentRed)
+                line(512, 623.82, 512, 514.75, accent)
+                fillPoly("431.81 613.07 592.18 613.07 512.01 693.22 431.81 613.07", accent)
             }
             EditorSymbol.PASTE -> {
                 strokeSlot(0)
                 outlineBox(337, 112, 350, 100.06, 50)
                 line(412, 661.84, 612, 661.84)
-                line(412, 562.28, 612, 562.28, AccentRed)
+                line(412, 562.28, 612, 562.28, accent)
                 line(412, 762.41, 612, 762.41)
             }
             EditorSymbol.SHARE -> {
                 strokeSlot(0)
                 outlineBox(337, 112, 350, 100.06, 50)
                 strokePoly("412.06 661.84 412.06 762.34 611.94 762.34 611.94 661.84")
-                line(512, 661.84, 512, 562.34, AccentRed)
-                fillPoly("431.81 573.09 592.18 573.09 512.01 492.94 431.81 573.09", AccentRed)
+                line(512, 661.84, 512, 562.34, accent)
+                fillPoly("431.81 573.09 592.18 573.09 512.01 492.94 431.81 573.09", accent)
             }
             EditorSymbol.CLEAR, EditorSymbol.ERASE, EditorSymbol.DELETE -> {
                 strokeSlot(0); strokeSlot(1)
                 line(471.55, 609.05, 412, 549.5)
                 line(612, 749.5, 552.15, 689.65)
-                line(412, 749.5, 612, 549.5, AccentRed)
+                line(412, 749.5, 612, 549.5, accent)
                 line(162, 200.08, 862, 200.08)
             }
             EditorSymbol.EXPORT -> {
                 strokeSlot(0); strokeSlot(1); strokeSlot(2)
-                outlineBox(371.92, 195.86, 100, 138.44, 0, AccentRed)
+                outlineBox(371.92, 195.86, 100, 138.44, 0, accent)
             }
             EditorSymbol.TRASH -> {
-                strokeSlot(0, AccentRed)
+                strokeSlot(0, accent)
                 strokeSlot(1)
                 outlineBox(174.5, 300.61, 700, 598.89, 100)
                 line(471.55, 605.55, 412, 546)
                 line(612, 746, 552.15, 686.15)
-                line(412, 746, 612, 546, AccentRed)
+                line(412, 746, 612, 546, accent)
             }
         }
     }
