@@ -62,10 +62,7 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
         viewModelScope.launch {
             GlyphSupport.availableFlow.collect { isAvail ->
                 _ui.update {
-                    it.copy(
-                        glyph = preferences.getBoolean("glyph", true) && isAvail,
-                        glyphAvailable = isAvail
-                    )
+                    it.copy(glyphAvailable = isAvail)
                 }
             }
         }
@@ -86,11 +83,7 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
                 _ui.update {
                     it.copy(theme = options.theme, lineNumbers = options.lineNumbers,
                         autoName = options.autoName,
-                        // Observable now: the TopBar toggle reads this state, so
-                        // tapping it visibly flips. Previously a plain getter
-                        // re-read the pref but nothing recomposed — the switch
-                        // looked permanently off no matter how often you tapped.
-                        glyph = preferences.getBoolean("glyph", true) && GlyphSupport.available,
+                        glyph = preferences.getBoolean("glyph", true),
                         glyphAvailable = GlyphSupport.available)
                 }
                 val pending = restorePending()
@@ -365,6 +358,7 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
                     type = spec.mimeType
                     putExtra(Intent.EXTRA_STREAM, uri)
                     putExtra(Intent.EXTRA_SUBJECT, source.title)
+                    clipData = android.content.ClipData.newRawUri(source.title, uri)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
                 // Required: started from the Application context, so the
@@ -538,7 +532,7 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
     fun setGlyphEnabled(on: Boolean) {
         preferences.edit().putBoolean("glyph", on).apply()
         GlyphSupport.setEnabled(on)
-        _ui.update { it.copy(glyph = on && it.glyphAvailable) }
+        _ui.update { it.copy(glyph = on) }
     }
 
     fun setLineNumbers(show: Boolean) {

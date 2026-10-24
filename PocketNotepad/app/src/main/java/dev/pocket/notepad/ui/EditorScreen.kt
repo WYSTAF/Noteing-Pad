@@ -146,17 +146,21 @@ fun EditorScreen(model: NotepadViewModel) {
     if (shareFormatDialog) AlertDialog(
         onDismissRequest = { shareFormatDialog = false },
         title = { Text("SHARE FORMAT", style = MaterialTheme.typography.titleMedium) },
-        text = { Text("The note is sent as a real file, not pasted text. Choose the format:") },
-        confirmButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SquareButton(onClick = { shareFormatDialog = false; model.shareFile("txt") },
-                    enabled = true, filled = false) { Text("TXT", style = MaterialTheme.typography.labelSmall) }
-                SquareButton(onClick = { shareFormatDialog = false; model.shareFile("md") },
-                    enabled = true, filled = false) { Text("MD", style = MaterialTheme.typography.labelSmall) }
-                SquareButton(onClick = { shareFormatDialog = false; model.shareFile("pdf") },
-                    enabled = true, filled = false) { Text("PDF", style = MaterialTheme.typography.labelSmall) }
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("The note is sent as a real file, not pasted text. Choose the format:",
+                    style = MaterialTheme.typography.bodyMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    SquareButton(onClick = { shareFormatDialog = false; model.shareFile("txt") },
+                        enabled = true, filled = false) { Text("TXT", style = MaterialTheme.typography.labelSmall) }
+                    SquareButton(onClick = { shareFormatDialog = false; model.shareFile("md") },
+                        enabled = true, filled = false) { Text("MD", style = MaterialTheme.typography.labelSmall) }
+                    SquareButton(onClick = { shareFormatDialog = false; model.shareFile("pdf") },
+                        enabled = true, filled = false) { Text("PDF", style = MaterialTheme.typography.labelSmall) }
+                }
             }
         },
+        confirmButton = {},
         dismissButton = { TextButton(onClick = { shareFormatDialog = false }) { Text("CANCEL") } }
     )
     if (markdownDialog) MarkdownDialog({ markdownDialog = false }) { snippet ->

@@ -74,9 +74,7 @@ fun TopBar(
                         onClick = { onAutoName(!state.autoName) })
                     HorizontalDivider()
                     // Nothing Glyph master switch (Phone 2a strips, 3/4a matrix).
-                    // Off-menu entirely on devices without Glyph hardware, so
-                    // users never see a dead switch; otherwise state-backed.
-                    if (glyphAvailable) DropdownMenuItem(text = { Text("Glyph lights") },
+                    DropdownMenuItem(text = { Text("Glyph lights") },
                         trailingIcon = { MechanicalToggle(on = glyphOn) },
                         onClick = { onToggleGlyph(!glyphOn) })
                     HorizontalDivider()

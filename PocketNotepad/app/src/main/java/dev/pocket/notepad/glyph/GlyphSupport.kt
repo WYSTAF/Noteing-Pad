@@ -70,7 +70,22 @@ object GlyphSupport {
                 Common.is23111() || Common.is23113() -> Hardware.INTERFACE.also { zones = 26 }
                 Common.is24111() -> Hardware.INTERFACE.also { zones = 36 }
                 Common.is25111() || Common.is25111p() || Common.is25131() -> Hardware.MATRIX
-                else -> Hardware.UNKNOWN
+                else -> {
+                    val m = android.os.Build.MODEL.uppercase()
+                    val b = android.os.Build.BRAND.uppercase()
+                    val f = android.os.Build.MANUFACTURER.uppercase()
+                    val isNothing = b.contains("NOTHING") || f.contains("NOTHING")
+                    when {
+                        isNothing && (m.contains("A063") || m.contains("PHONE (1)") || m == "PHONE 1") ->
+                            Hardware.INTERFACE.also { zones = 16 }
+                        isNothing && (m.contains("A142") || m.contains("2A")) ->
+                            Hardware.INTERFACE.also { zones = 26 }
+                        isNothing && (m.contains("A065") || m.contains("PHONE (2)") || m == "PHONE 2") ->
+                            Hardware.INTERFACE.also { zones = 34 }
+                        isNothing -> Hardware.INTERFACE.also { zones = 26 }
+                        else -> Hardware.UNKNOWN
+                    }
+                }
             }
             if (hardware == Hardware.UNKNOWN) return
             val app = context.applicationContext

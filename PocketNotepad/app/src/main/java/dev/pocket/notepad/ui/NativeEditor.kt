@@ -205,7 +205,7 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
             if (!overScroller.isFinished) {
                 overScroller.abortAnimation()
             }
-            return false
+            return true
         }
 
         override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
@@ -218,7 +218,8 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
             if (highRateHint) requestHighRate(true)
             // In Android, a downward finger swipe produces positive velocityY (scrolling up toward 0),
             // while an upward finger swipe produces negative velocityY (scrolling down toward maxScrollY).
-            overScroller.fling(0, scrollY, 0, -velocityY.toInt(), 0, 0, 0, maxScrollY)
+            val boostedVy = (-velocityY * 1.35f).toInt()
+            overScroller.fling(0, scrollY, 0, boostedVy, 0, 0, 0, maxScrollY)
             postInvalidateOnAnimation()
             return true
         }
