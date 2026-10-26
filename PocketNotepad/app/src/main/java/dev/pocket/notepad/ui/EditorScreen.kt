@@ -11,6 +11,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -39,7 +41,7 @@ fun EditorScreen(model: NotepadViewModel) {
     var pendingErase by rememberSaveable { mutableStateOf<String?>(null) }
     var renameDialog by rememberSaveable { mutableStateOf(false) }
     var shareFormatDialog by rememberSaveable { mutableStateOf(false) }
-    var markdownDialog by rememberSaveable { mutableStateOf(false) }
+    var markdownBarOpen by rememberSaveable { mutableStateOf(false) }
     // Last completed scroll gesture: (fps, dropped frames). Not saved — resets
     // on recomposition so a stale number can't mislead the next experiment.
     var frameStats by remember { mutableStateOf<Pair<Int, Int>?>(null) }
@@ -101,8 +103,13 @@ fun EditorScreen(model: NotepadViewModel) {
                         model::paste, { if (!model.blocked) shareFormatDialog = true },
                         model::undo, model::redo, requestExport,
                         model::setTheme, model::setLineNumbers, model::setAutoName,
-                        { markdownDialog = true },
+                        { markdownBarOpen = !markdownBarOpen },
+                        markdownBarOpen,
                         state.glyph, state.glyphAvailable, model::setGlyphEnabled, frameStats)
+                    if (markdownBarOpen) {
+                        MarkdownToolbar(onSnippet = { snippet -> model.insertMarkdown(snippet) })
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
+                    }
                     if (state.busy) {
                         SegmentedLoader()
                         Text(state.activity.uppercase(), modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
@@ -163,10 +170,6 @@ fun EditorScreen(model: NotepadViewModel) {
         confirmButton = {},
         dismissButton = { TextButton(onClick = { shareFormatDialog = false }) { Text("CANCEL") } }
     )
-    if (markdownDialog) MarkdownDialog({ markdownDialog = false }) { snippet ->
-        markdownDialog = false
-        model.insertMarkdown(snippet)
-    }
     if (renameDialog) RenameDialog(state.title, { renameDialog = false }) { name ->
         renameDialog = false
         model.renameNote(name)
@@ -192,58 +195,50 @@ fun EditorScreen(model: NotepadViewModel) {
 }
 
 /**
- * Markdown insert palette. The app stays a plain-text editor (no renderer on
- * purpose), so these insert Markdown SOURCE — the exact bytes a .md file holds.
- * Alignment pairs follow the user's marker convention: a start sign and an end
- * sign on their own lines; every line between them aligns when the file is
- * rendered or exported.
+ * Quick inline Markdown formatting bar (Nothing-style):
+ * Replaces the disruptive modal dialog with an immediate, non-intrusive toolbar.
+ * Users can format headings, bold, bullet points, alignment markers, code, etc.
+ * right while typing without dismissing focus or keyboard.
  */
 @Composable
-private fun MarkdownDialog(onDismiss: () -> Unit, onPick: (String) -> Unit) {
-    val blocks = listOf(
-        "HEADING" to "## Heading",
-        "BULLET LIST" to "- Item\n- ",
-        "• BULLET POINT" to "• ",
-        "NUMBERED LIST" to "1. First\n2. ",
-        "TASK LIST" to "- [ ] Todo\n- [x] Done\n",
-        "CODE" to "```\ncode\n```",
-        "QUOTE" to "> quoted text",
-        "TABLE" to "| Column A | Column B |\n| --- | --- |\n| Cell | Cell |\n",
-        "DIVIDER" to "---",
-        "LINK" to "[label](https://)"
+fun MarkdownToolbar(onSnippet: (String) -> Unit) {
+    val items = listOf(
+        "H1" to "# ",
+        "H2" to "## ",
+        "H3" to "### ",
+        "B" to "****",
+        "I" to "**",
+        "•" to "• ",
+        "1." to "1. ",
+        "[ ]" to "- [ ] ",
+        "\"" to "> ",
+        "<>" to "```\n\n```",
+        "CENTER" to "<!--align:center-->\n\n<!--/align-->",
+        "RIGHT" to "<!--align:right-->\n\n<!--/align-->",
+        "LINK" to "[label](https://)",
+        "TABLE" to "| Col 1 | Col 2 |\n|---|---|\n|   |   |\n",
+        "---" to "---\n"
     )
-    // Alignment markers: start/end sign pair; text between the pair aligns.
-    val alignments = listOf(
-        "ALIGN CENTER" to "<!--align:center-->\n\n<!--/align-->",
-        "ALIGN LEFT" to "<!--align:left-->\n\n<!--/align-->",
-        "ALIGN RIGHT" to "<!--align:right-->\n\n<!--/align-->"
-    )
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("INSERT MARKDOWN", style = MaterialTheme.typography.titleMedium) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("INSERTS MARKDOWN SOURCE AT THE CARET", style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                blocks.forEach { (label, snippet) ->
-                    SquareButton(onClick = { onPick(snippet) }, enabled = true, filled = false) {
-                        Text(label, style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-                Text("ALIGNMENT MARKERS — TEXT BETWEEN THE SIGNS ALIGNS",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                alignments.forEach { (label, snippet) ->
-                    SquareButton(onClick = { onPick(snippet) }, enabled = true, filled = false) {
-                        Text(label, style = MaterialTheme.typography.labelSmall)
-                    }
-                }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        items.forEach { (label, snippet) ->
+            SquareButton(
+                onClick = { onSnippet(snippet) },
+                enabled = true,
+                filled = false,
+                modifier = Modifier.heightIn(min = 32.dp)
+            ) {
+                Text(label, style = MaterialTheme.typography.labelSmall)
             }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("CLOSE") } }
-    )
+        }
+    }
 }
 
 /** 1..9999 verbatim, then compact k form (10000 → "10k", 10600 → "10.6k"). */

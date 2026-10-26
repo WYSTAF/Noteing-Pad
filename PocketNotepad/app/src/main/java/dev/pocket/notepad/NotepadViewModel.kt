@@ -203,6 +203,7 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
 
     fun newNote() {
         if (blocked) return
+        GlyphSupport.onNew()
         flushPendingSave()
         val id = repository.nextId()
         savedRope = Rope.Empty
@@ -218,6 +219,7 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
 
     fun openNote(id: String) {
         if (blocked) return
+        GlyphSupport.onNew()
         flushPendingSave()
         _ui.update { it.copy(busy = true, activity = "Opening note") }
         viewModelScope.launch {
@@ -239,6 +241,7 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
 
     /** Leaves the editor for the library; saves are debounced, so flush first. */
     fun backToLibrary() {
+        GlyphSupport.onBack()
         flushPendingSave()
         viewModelScope.launch {
             try { refreshNotes() }
@@ -259,7 +262,8 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
         viewModelScope.launch {
             try {
                 repository.deleteNote(id)
-                GlyphSupport.blink()
+                dev.pocket.notepad.ui.vibrateDelete(getApplication())
+                GlyphSupport.onDelete()
                 if (_ui.value.noteId == id) {
                     // The editor was showing this note; leave it to the library.
                     savedRope = null
@@ -309,6 +313,8 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
         viewModelScope.launch {
             try {
                 repository.deleteForever(id)
+                dev.pocket.notepad.ui.vibrateDelete(getApplication())
+                GlyphSupport.onDelete()
                 refreshTrash()
             } catch (failure: Exception) {
                 if (failure is CancellationException) throw failure
@@ -321,6 +327,8 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
         viewModelScope.launch {
             try {
                 repository.emptyTrash()
+                dev.pocket.notepad.ui.vibrateDelete(getApplication())
+                GlyphSupport.onDelete()
                 refreshTrash()
                 notify("Trash emptied.")
             } catch (failure: Exception) {

@@ -111,6 +111,7 @@ private fun SwipeToTrashRow(
     content: @Composable () -> Unit
 ) {
     val density = LocalDensity.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     val threshold = with(density) { 88.dp.toPx() }
     var offsetX by remember { mutableFloatStateOf(0f) }
     val animated by animateFloatAsState(
@@ -140,7 +141,11 @@ private fun SwipeToTrashRow(
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
-                            if (offsetX < -threshold) { offsetX = 0f; onTrash() }
+                            if (offsetX < -threshold) {
+                                vibrateDelete(context)
+                                offsetX = 0f
+                                onTrash()
+                            }
                             else offsetX = 0f
                         },
                         onDragCancel = { offsetX = 0f },

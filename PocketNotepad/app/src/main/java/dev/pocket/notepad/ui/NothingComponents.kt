@@ -35,21 +35,70 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 
+/** Short crisp haptic vibration for note deletion / confirmation. */
+fun vibrateDelete(context: android.content.Context) {
+    runCatching {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            val vm = context.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
+            vm?.defaultVibrator?.vibrate(android.os.VibrationEffect.createOneShot(45L, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+        } else {
+            @Suppress("DEPRECATION")
+            val v = context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                v?.vibrate(android.os.VibrationEffect.createOneShot(45L, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                v?.vibrate(45L)
+            }
+        }
+    }
+}
+
 // Shared Nothing-style controls (skill: nothing-design): square outlined
 // buttons, mechanical toggles, filled/hollow selection squares.
 
 @Composable
-fun SquareButton(label: String, icon: EditorSymbol, enabled: Boolean, action: () -> Unit) {
+fun SquareButton(
+    label: String, icon: EditorSymbol, enabled: Boolean,
+    action: () -> Unit
+) {
     SquareButton(onClick = action, enabled = enabled, filled = false) {
         EditorIcon(icon, label)
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(6.dp))
         Text(label, style = MaterialTheme.typography.labelSmall)
     }
 }
 
 @Composable
-fun SquareButton(icon: EditorSymbol, label: String, enabled: Boolean, action: () -> Unit) {
+fun SquareButton(
+    label: String, icon: EditorSymbol, enabled: Boolean,
+    modifier: Modifier, filled: Boolean = false,
+    action: () -> Unit
+) {
+    SquareButton(onClick = action, enabled = enabled, filled = filled, modifier = modifier) {
+        EditorIcon(icon, label)
+        Spacer(Modifier.width(6.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+@Composable
+fun SquareButton(
+    icon: EditorSymbol, label: String, enabled: Boolean,
+    action: () -> Unit
+) {
     SquareButton(onClick = action, enabled = enabled, filled = false) {
+        EditorIcon(icon, label)
+    }
+}
+
+@Composable
+fun SquareButton(
+    icon: EditorSymbol, label: String, enabled: Boolean,
+    modifier: Modifier, filled: Boolean = false,
+    action: () -> Unit
+) {
+    SquareButton(onClick = action, enabled = enabled, filled = filled, modifier = modifier) {
         EditorIcon(icon, label)
     }
 }
@@ -60,7 +109,9 @@ fun SquareButton(icon: EditorSymbol, label: String, enabled: Boolean, action: ()
  */
 @Composable
 fun SquareButton(
-    onClick: () -> Unit, enabled: Boolean, filled: Boolean, content: @Composable RowScope.() -> Unit
+    onClick: () -> Unit, enabled: Boolean, filled: Boolean,
+    modifier: Modifier = Modifier,
+    content: @Composable RowScope.() -> Unit
 ) {
     val scheme = MaterialTheme.colorScheme
     val ink = scheme.onBackground
@@ -71,15 +122,14 @@ fun SquareButton(
         else -> ink
     }
     Row(verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+        modifier = modifier
             .background(if (filled && enabled) ink else Color.Transparent)
             .border(1.dp, if (enabled) ink else scheme.outlineVariant)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 9.dp)
+            .padding(horizontal = 10.dp, vertical = 9.dp)
             .heightIn(min = 36.dp),
         content = {
-            // Trailing-lambda form: the vararg overload takes content last, and
-            // naming it fails overload resolution (seen once already in TopBar).
             CompositionLocalProvider(LocalContentColor provides contentColor) { content() }
         })
 }

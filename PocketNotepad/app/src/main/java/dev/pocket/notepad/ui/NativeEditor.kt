@@ -92,20 +92,14 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
     var numberSource: Rope = Rope.Empty
 
     // ---- Draggable scroll handle ------------------------------------------
-    // Framework scrollbars on TextView/ScrollView are INDICATORS — Android has
-    // never made them grabbable there (it's a known framework gap; only the
-    // ListView family got thumb hit-testing). The styled thumb shipped in
-    // v1.5.x was therefore decorative no matter how it was configured. This
-    // is a real one: drawn by this view, hit-tested in onTouchEvent, drives
-    // scrollTo directly. Tap the track to jump, grab the thumb to scrub.
-    private val thumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x66808080 }
-    private val thumbActivePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xB0606060.toInt() }
+    private val thumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xAA888888.toInt() }
+    private val thumbActivePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFD92C35.toInt() }
     private val thumbRectScratch = android.graphics.RectF()
     private var scrubbingThumb = false
     private var thumbGrabOffsetY = 0f
     private val thumbWidthPx get() = 5f * density
-    private val thumbEdgePx get() = 2f * density
-    private val thumbHitPx get() = 18f * density      // generous grab target
+    private val thumbEdgePx get() = 3f * density
+    private val thumbHitPx get() = 24f * density      // generous grab target
 
     /** Fill rect and return true when content is scrollable. */
     private fun currentThumbRect(rect: android.graphics.RectF): Boolean {
@@ -116,7 +110,7 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
         val trackBottom = (height - totalPaddingBottom).toFloat()
         val trackH = trackBottom - trackTop
         val visible = height.toFloat() / (max + height.toFloat())
-        val thumbH = (trackH * visible).coerceAtLeast(40f * density)
+        val thumbH = (trackH * visible).coerceAtLeast(36f * density)
         val travel = trackH - thumbH
         val y = trackTop + (scrollY.toFloat() / max) * travel
         rect.set(width - thumbEdgePx - thumbWidthPx, y, width - thumbEdgePx, y + thumbH)
@@ -125,10 +119,12 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
 
     private fun drawScrollHandle(canvas: Canvas) {
         if (!currentThumbRect(thumbRectScratch)) return
+        canvas.save()
+        // Cancel the scroll offset translation so the thumb stays pinned to viewport coordinates
+        canvas.translate(scrollX.toFloat(), scrollY.toFloat())
         val paint = if (scrubbingThumb) thumbActivePaint else thumbPaint
-        val left = thumbRectScratch.left
-        canvas.drawRoundRect(left, thumbRectScratch.top, thumbRectScratch.right,
-            thumbRectScratch.bottom, 2.5f * density, 2.5f * density, paint)
+        canvas.drawRoundRect(thumbRectScratch, 2.5f * density, 2.5f * density, paint)
+        canvas.restore()
     }
 
     private fun applyThumbScrub(y: Float) {
@@ -183,7 +179,9 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
      * and drive OverScroller along Android's native spline deceleration curve,
      * stepping computeScroll() on every VSYNC frame.
      */
-    private val overScroller = OverScroller(context)
+    private val overScroller = OverScroller(context).apply {
+        setFriction(0.005f) // Smooth, natural momentum matching Compose LazyColumn
+    }
     private var unbufferedTouch = true
     private var highRateHint = true
         set(value) {
@@ -218,7 +216,7 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
             if (highRateHint) requestHighRate(true)
             // In Android, a downward finger swipe produces positive velocityY (scrolling up toward 0),
             // while an upward finger swipe produces negative velocityY (scrolling down toward maxScrollY).
-            val boostedVy = (-velocityY * 1.35f).toInt()
+            val boostedVy = (-velocityY * 1.6f).toInt()
             overScroller.fling(0, scrollY, 0, boostedVy, 0, 0, 0, maxScrollY)
             postInvalidateOnAnimation()
             return true
@@ -317,6 +315,16 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
         // Keep the handle glued to reality during drag/fling/caret scrolls,
         // and line numbers current — full invalidate ensures zero frame tearing.
         if (showNumbers || currentThumbRect(thumbRectScratch)) invalidateBands()
+
+        // Mirror scroll progress to Nothing Glyph in real time
+        val textLayout = layout
+        if (textLayout != null) {
+            val max = textLayout.height + totalPaddingTop + totalPaddingBottom - height
+            if (max > 0) {
+                val percent = (t.toFloat() / max * 100).toInt().coerceIn(0, 100)
+                dev.pocket.notepad.glyph.GlyphSupport.onScrollProgress(percent)
+            }
+        }
     }
 
     override fun onSelectionChanged(selStart: Int, selEnd: Int) {

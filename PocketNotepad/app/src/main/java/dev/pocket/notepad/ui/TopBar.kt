@@ -25,6 +25,7 @@ fun TopBar(
     onExport: () -> Unit, onTheme: (ThemeMode) -> Unit,
     onLineNumbers: (Boolean) -> Unit, onAutoName: (Boolean) -> Unit,
     onMarkdown: () -> Unit,
+    markdownBarOpen: Boolean = false,
     glyphOn: Boolean, glyphAvailable: Boolean, onToggleGlyph: (Boolean) -> Unit,
     frameStats: Pair<Int, Int>? = null
 ) {
@@ -33,7 +34,7 @@ fun TopBar(
     Column {
         Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 16.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            SquareButton(EditorSymbol.BACK, "Back to library", true, onBack)
+            SquareButton(EditorSymbol.BACK, "Back to library", true, action = onBack)
             Spacer(Modifier.width(10.dp))
             // Tap the title to rename — affordance undiscoverable on purpose;
             // the header stays quiet.
@@ -102,16 +103,16 @@ fun TopBar(
                 }
             }
         }
-        // Static action row — no scrolling, exactly the five actions the user
-        // chose: paste, share, md, undo, redo. (Clear moved out of the row.)
+        // Static full-width action row: buttons evenly span edge-to-edge
+        // with no awkward empty space on the right of undo and redo.
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            SquareButton("PASTE", EditorSymbol.PASTE, available, onPaste)
-            SquareButton("SHARE", EditorSymbol.SHARE, available, onShare)
-            SquareButton("MD", EditorSymbol.ADD, available, onMarkdown)
-            SquareButton(EditorSymbol.UNDO, "Undo", available && state.canUndo, onUndo)
-            SquareButton(EditorSymbol.REDO, "Redo", available && state.canRedo, onRedo)
+            SquareButton("PASTE", EditorSymbol.PASTE, available, modifier = Modifier.weight(1.15f), action = onPaste)
+            SquareButton("SHARE", EditorSymbol.SHARE, available, modifier = Modifier.weight(1.15f), action = onShare)
+            SquareButton("MD", EditorSymbol.ADD, available, modifier = Modifier.weight(1.0f), filled = markdownBarOpen, action = onMarkdown)
+            SquareButton(EditorSymbol.UNDO, "Undo", available && state.canUndo, modifier = Modifier.weight(0.85f), action = onUndo)
+            SquareButton(EditorSymbol.REDO, "Redo", available && state.canRedo, modifier = Modifier.weight(0.85f), action = onRedo)
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
     }

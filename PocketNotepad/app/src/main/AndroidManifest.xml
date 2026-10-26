@@ -6,6 +6,7 @@
          (which no-ops unless a supported device registers successfully), so
          the app keeps its own minSdk 26 rather than excluding older phones. -->
     <uses-permission android:name="com.nothing.ketchum.permission.ENABLE" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-sdk tools:overrideLibrary="com.nothing.thirdparty" />
     <queries>
         <package android:name="com.nothing.thirdparty" />
