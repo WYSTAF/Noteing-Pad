@@ -74,7 +74,6 @@ fun LibraryScreen(
             }
         } else {
             val listState = rememberLazyListState()
-            val scope = rememberCoroutineScope()
             LazyColumn(Modifier.fillMaxSize(), state = listState) {
                 items(notes, key = { it.id }) { note ->
                     SwipeToTrashRow(
@@ -101,8 +100,9 @@ fun LibraryScreen(
 
 /**
  * Gmail-style swipe: dragging left slides the row away and uncovers a solid
- * red panel with the trash glyph; releasing past the threshold commits.
- * No per-row delete button by design.
+ * red panel with the delete glyph; releasing past the threshold commits.
+ * Uses matchParentSize() on the reveal panel because fillMaxSize() collapses
+ * vertically inside LazyColumn's unbounded height constraints.
  */
 @Composable
 private fun SwipeToTrashRow(
@@ -112,6 +112,8 @@ private fun SwipeToTrashRow(
 ) {
     val density = LocalDensity.current
     val context = androidx.compose.ui.platform.LocalContext.current
+    val currentOpen by rememberUpdatedState(onOpen)
+    val currentTrash by rememberUpdatedState(onTrash)
     val threshold = with(density) { 88.dp.toPx() }
     var offsetX by remember { mutableFloatStateOf(0f) }
     val animated by animateFloatAsState(
@@ -121,15 +123,18 @@ private fun SwipeToTrashRow(
     )
 
     Box(Modifier.fillMaxWidth().clipToBounds()) {
-        // Red action panel behind the row, revealed as the row slides left.
+        // Red action panel behind the row, matching the foreground card's exact height.
         Box(
-            Modifier.fillMaxSize().background(Color(0xFFD92C35)),
+            Modifier.matchParentSize().background(Color(0xFFD92C35)),
             contentAlignment = Alignment.CenterEnd
         ) {
-            Box(Modifier.padding(end = 28.dp).size(24.dp)) {
+            Box(
+                Modifier.padding(end = 24.dp).size(26.dp),
+                contentAlignment = Alignment.Center
+            ) {
                 CompositionLocalProvider(
                     androidx.compose.material3.LocalContentColor provides Color.White
-                ) { EditorIcon(EditorSymbol.TRASH, "Move to trash") }
+                ) { EditorIcon(EditorSymbol.DELETE, "Move to trash") }
             }
         }
         Box(
@@ -137,24 +142,20 @@ private fun SwipeToTrashRow(
                 .fillMaxWidth()
                 .offset { IntOffset(animated.roundToInt(), 0) }
                 .background(MaterialTheme.colorScheme.background)
-                .clickable(enabled = abs(animated) < 1f) { onOpen() }
+                .clickable(enabled = abs(animated) < 1f) { currentOpen() }
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
                             if (offsetX < -threshold) {
                                 vibrateDelete(context)
                                 offsetX = 0f
-                                onTrash()
+                                currentTrash()
+                            } else {
+                                offsetX = 0f
                             }
-                            else offsetX = 0f
                         },
                         onDragCancel = { offsetX = 0f },
                         onHorizontalDrag = { _, drag ->
-                            // Left-only, 1:1 up to the commit point; only the
-                            // overshoot past -threshold is rubber-banded. The
-                            // old version scaled the whole drag by 0.25, so
-                            // reaching the threshold took ~4x the finger travel
-                            // and a normal flick almost never committed.
                             val next = (offsetX + drag).coerceAtMost(0f)
                             offsetX = if (next >= -threshold) next
                             else (-threshold + (next + threshold) * 0.25f)

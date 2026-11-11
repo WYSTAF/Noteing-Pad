@@ -55,26 +55,20 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
     // — those pokes were being coalesced/skipped on some devices, freezing the
     // numbers until the next selection change. There is no such window here.
     private val density = resources.displayMetrics.density
-    // Compact gutter: sized tight for a 4-digit column ("9999") with 8dp
-    // breathing room before text starts, saving horizontal screen space.
-    private val gutterWidthPx = 30f * density       // band: numbers right-align here
-    private val textLeftPadPx = 38f * density       // 8dp breathing room after band
     private val edgePadPx = 16f * density           // matches editor_view.xml padding
     private val numberPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        // Explicit init: Paint defaults to opaque BLACK, which combined with
-        // the old setter guard (initial field == dark-mode #999999) left the
-        // paint black on OLED — invisible numbers in dark mode.
         color = 0xFF999999.toInt()
         typeface = Typeface.MONOSPACE
         textSize = 12f * resources.displayMetrics.scaledDensity
         textAlign = Paint.Align.RIGHT
     }
     private val activePaint = Paint(numberPaint).apply { color = 0xFFFF0000.toInt() }
+    // Compact gutter: fits 4 digits ("9999") cleanly at any system font scale,
+    // without clipping the left edge, plus 8dp breathing room before text.
+    private val gutterWidthPx = maxOf(32f * density, numberPaint.measureText("9999") + 5f * density)
+    private val textLeftPadPx = gutterWidthPx + 8f * density
     var numbersColor = 0xFF999999.toInt()
-        // No change-guard: Paint.color assignment is free, and the guard was
-        // the bug (a sentinel default can equal the real first value). Editor
-        // host's own muted-cache prevents redundant invalidates.
-        set(value) { field = value; numberPaint.color = value; invalidateGutter() }
+        set(value) { field = value; numberPaint.color = value; invalidateOverlay() }
     var showNumbers = false
         set(value) {
             if (field != value) {
@@ -84,11 +78,11 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
                     paddingTop, paddingRight, paddingBottom
                 )
                 invalidate()
+                invalidateOverlay()
             }
         }
     // Rope the current Layout was built from — bind() and edits keep this in
-    // lockstep with the text buffer so wrap classification never races (the
-    // duplicated-"1" bug). Never read model state during draw.
+    // lockstep with the text buffer so wrap classification never races.
     var numberSource: Rope = Rope.Empty
 
     // ---- Draggable scroll handle ------------------------------------------
@@ -99,9 +93,9 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
     private var thumbGrabOffsetY = 0f
     private val thumbWidthPx get() = 5f * density
     private val thumbEdgePx get() = 3f * density
-    private val thumbHitPx get() = 24f * density      // generous grab target
+    private val thumbHitPx get() = 24f * density      // generous grab target near thumb
 
-    /** Fill rect and return true when content is scrollable. */
+    /** Fill rect (in viewport coordinates) and return true when content is scrollable. */
     private fun currentThumbRect(rect: android.graphics.RectF): Boolean {
         val textLayout = layout ?: return false
         val max = textLayout.height + totalPaddingTop + totalPaddingBottom - height
@@ -117,16 +111,6 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
         return true
     }
 
-    private fun drawScrollHandle(canvas: Canvas) {
-        if (!currentThumbRect(thumbRectScratch)) return
-        canvas.save()
-        // Cancel the scroll offset translation so the thumb stays pinned to viewport coordinates
-        canvas.translate(scrollX.toFloat(), scrollY.toFloat())
-        val paint = if (scrubbingThumb) thumbActivePaint else thumbPaint
-        canvas.drawRoundRect(thumbRectScratch, 2.5f * density, 2.5f * density, paint)
-        canvas.restore()
-    }
-
     private fun applyThumbScrub(y: Float) {
         val textLayout = layout ?: return
         val max = textLayout.height + totalPaddingTop + totalPaddingBottom - height
@@ -134,7 +118,7 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
         val trackTop = totalPaddingTop.toFloat()
         val trackH = (height - totalPaddingBottom - totalPaddingTop).toFloat()
         val visible = height.toFloat() / (max + height.toFloat())
-        val thumbH = (trackH * visible).coerceAtLeast(40f * density)
+        val thumbH = (trackH * visible).coerceAtLeast(36f * density)
         val travel = (trackH - thumbH).coerceAtLeast(1f)
         val frac = ((y - thumbGrabOffsetY - trackTop) / travel).coerceIn(0f, 1f)
         scrollTo(0, (frac * max).toInt())
@@ -262,12 +246,21 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
                 if (!overScroller.isFinished) {
                     overScroller.abortAnimation()
                 }
-                // Handle strip first: a grab here must never place the caret.
-                if (event.x >= width - thumbHitPx && currentThumbRect(thumbRectScratch)) {
+                // Handle strip: either touching directly along the 10dp right track
+                // or grabbing within 24dp horizontally & 20dp vertically around the thumb.
+                val hasThumb = currentThumbRect(thumbRectScratch)
+                val hitThumb = hasThumb && (
+                    event.x >= width - 10f * density ||
+                    (event.x >= width - thumbHitPx &&
+                        event.y >= thumbRectScratch.top - 20f * density &&
+                        event.y <= thumbRectScratch.bottom + 20f * density)
+                )
+                if (hitThumb) {
                     scrubbingThumb = true
                     thumbGrabOffsetY = if (event.y < thumbRectScratch.top ||
                         event.y > thumbRectScratch.bottom) thumbRectScratch.height() / 2f
                         else event.y - thumbRectScratch.top      // grab, keep offset
+                    parent?.requestDisallowInterceptTouchEvent(true)
                     removeCallbacks(disarmMeter)
                     frameHealth.setArmed(true)
                     applyThumbScrub(event.y)
@@ -280,11 +273,17 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
             }
             MotionEvent.ACTION_MOVE -> {
                 if (scrubbingThumb) { applyThumbScrub(event.y); return true }
+                parent?.requestDisallowInterceptTouchEvent(true)
                 if (unbufferedTouch && Build.VERSION.SDK_INT >= 28) requestUnbufferedDispatch(event)
                 if (highRateHint) requestHighRate(true)
             }
             MotionEvent.ACTION_UP -> {
-                if (scrubbingThumb) { scrubbingThumb = false; invalidateBands(); scheduleDisarm(); return true }
+                if (scrubbingThumb) {
+                    scrubbingThumb = false
+                    invalidateOverlay()
+                    scheduleDisarm()
+                    return true
+                }
             }
             MotionEvent.ACTION_CANCEL -> {
                 scrubbingThumb = false
@@ -305,18 +304,24 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
         postDelayed(disarmMeter, 150)
     }
 
-    private fun invalidateGutter() = invalidate()
+    /**
+     * Invalidate ONLY the parent overlay (EditorHost), keeping NotepadEditText's
+     * hardware GPU RenderNode cache intact during 120Hz scrolling.
+     */
+    internal fun invalidateOverlay() {
+        (parent as? View)?.invalidate()
+    }
 
-    /** Redraw on scroll so gutter numbers and scroll handle update atomically with the text. */
-    private fun invalidateBands() = invalidate()
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        if (changed) invalidateOverlay()
+    }
 
     override fun onScrollChanged(l: Int, t: Int, oldl: Int, oldt: Int) {
         super.onScrollChanged(l, t, oldl, oldt)
-        // Keep the handle glued to reality during drag/fling/caret scrolls,
-        // and line numbers current — full invalidate ensures zero frame tearing.
-        if (showNumbers || currentThumbRect(thumbRectScratch)) invalidateBands()
+        if (showNumbers || currentThumbRect(thumbRectScratch)) invalidateOverlay()
 
-        // Mirror scroll progress to Nothing Glyph in real time
+        // Mirror scroll progress to Nothing Glyph asynchronously (throttled in GlyphSupport)
         val textLayout = layout
         if (textLayout != null) {
             val max = textLayout.height + totalPaddingTop + totalPaddingBottom - height
@@ -329,25 +334,29 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
 
     override fun onSelectionChanged(selStart: Int, selEnd: Int) {
         super.onSelectionChanged(selStart, selEnd)
-        if (showNumbers) invalidateGutter()
+        if (showNumbers) invalidateOverlay()
         selectionChanged?.invoke(selStart, selEnd)
     }
 
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)   // stock text render, stock scroll behavior
-        drawScrollHandle(canvas)
+    /** Drawn by EditorHost.dispatchDraw in screen coordinates on the exact same VSYNC frame. */
+    internal fun drawOverlay(canvas: Canvas) {
+        if (currentThumbRect(thumbRectScratch)) {
+            val paint = if (scrubbingThumb) thumbActivePaint else thumbPaint
+            canvas.drawRoundRect(thumbRectScratch, 2.5f * density, 2.5f * density, paint)
+        }
         if (!showNumbers) return
         val textLayout = layout ?: return
         val root = numberSource
         val total = root.length
         if (total == 0 || textLayout.lineCount == 0) return
-        val firstLine = textLayout.getLineForVertical(scrollY)
-        val lastLine = (textLayout.getLineForVertical(scrollY + height) + 1)
+
+        val topY = (scrollY - totalPaddingTop).coerceAtLeast(0)
+        val botY = (scrollY + height - totalPaddingTop).coerceAtLeast(0)
+        val firstLine = textLayout.getLineForVertical(topY)
+        val lastLine = (textLayout.getLineForVertical(botY) + 1)
             .coerceAtMost(textLayout.lineCount - 1)
         if (lastLine < firstLine) return
         val count = lastLine - firstLine + 1
-        // Reuse viewport-sized buffers; grow only when a genuinely larger
-        // window appears (font-scale change), never per frame.
         if (count > lineStartsBuf.size) {
             lineStartsBuf = IntArray(count)
             lineEndsBuf = IntArray(count)
@@ -364,32 +373,25 @@ class NotepadEditText(context: Context, attrs: AttributeSet?) : EditText(context
         if (selA >= 0 && selB >= 0)
             GutterLogic.activateInto(root, starts, ends, selA, selB, count, groupActiveBuf)
         else java.util.Arrays.fill(groupActiveBuf, 0, count, false)
-        // Stable line numbering: determine the line number of the first visible
-        // logical line start, then increment deterministically. In the old logic,
-        // if starts[0] was a soft-wrapped continuation, it evaluated newlinesBefore(starts[0])
-        // and skipped incrementing, causing all visible line numbers to jump by 1
-        // every time a wrapped line scrolled past the top of the viewport.
+
+        val saved = canvas.save()
+        canvas.clipRect(0, totalPaddingTop, width, (height - totalPaddingBottom).coerceAtLeast(totalPaddingTop))
         var currentLineNumber = -1
         for (i in 0 until count) {
-            // Soft-wrapped continuations deliberately get no number.
-            if (starts[i] == 0 || root[starts[i] - 1] == '\n') {
+            val s = starts[i]
+            if (s <= total && (s == 0 || root[s - 1] == '\n')) {
                 if (currentLineNumber == -1) {
-                    currentLineNumber = if (starts[i] == 0) 1 else root.newlinesBefore(starts[i]) + 1
+                    currentLineNumber = if (s == 0) 1 else root.newlinesBefore(s) + 1
                 } else {
                     currentLineNumber++
                 }
-                // The framework already translated this canvas by -scrollY before
-                // onDraw ran (that's why super.onDraw places text without scroll
-                // math) — subtracting scrollY again would double-shift numbers.
-                val baseline = textLayout.getLineBaseline(firstLine + i) + totalPaddingTop
+                val screenBaseline = (textLayout.getLineBaseline(firstLine + i) + totalPaddingTop - scrollY).toFloat()
                 val paint = if (groupActiveBuf[i]) activePaint else numberPaint
-                // CharSequence overload: the scratch StringBuilder is one, so
-                // labels cost zero fresh Strings on the scroll hot path.
                 val label = writeLineNumber(currentLineNumber)
-                canvas.drawText(label, 0, label.length,
-                    gutterWidthPx, baseline.toFloat(), paint)
+                canvas.drawText(label, 0, label.length, gutterWidthPx, screenBaseline, paint)
             }
         }
+        canvas.restoreToCount(saved)
     }
 
     override fun onTextContextMenuItem(id: Int): Boolean = when (id) {
@@ -447,6 +449,7 @@ private class EditorHost(context: Context, private val model: NotepadViewModel) 
     init {
         orientation = HORIZONTAL
         isSaveEnabled = false
+        setWillNotDraw(false)
         editor.isSaveEnabled = false
         editor.breakStrategy = android.graphics.text.LineBreaker.BREAK_STRATEGY_SIMPLE
         editor.hyphenationFrequency = Layout.HYPHENATION_FREQUENCY_NONE
@@ -484,6 +487,7 @@ private class EditorHost(context: Context, private val model: NotepadViewModel) 
                 if (before == count && (0 until count).all { old[start + it] == inserted[it] }) return
                 boundRevision = model.nativeEdit(start, before, inserted, beforeSelection)
                 editor.numberSource = model.ui.value.root
+                invalidate()
             }
             override fun afterTextChanged(s: Editable?) = Unit
         })
@@ -493,6 +497,11 @@ private class EditorHost(context: Context, private val model: NotepadViewModel) 
         editor.pasteAction = model::paste
         editor.undoAction = model::undo
         editor.redoAction = model::redo
+    }
+
+    override fun dispatchDraw(canvas: Canvas) {
+        super.dispatchDraw(canvas)
+        editor.drawOverlay(canvas)
     }
 
     fun bind(state: EditorUiState, ink: Int, muted: Int, surface: Int, highlight: Int) {
@@ -524,6 +533,7 @@ private class EditorHost(context: Context, private val model: NotepadViewModel) 
                 boundRevision = state.revision
                 editor.numberSource = state.root
                 if (editor.hasFocus()) context.getSystemService(InputMethodManager::class.java)?.restartInput(editor)
+                invalidate()
             } finally { synchronizing = false }
         }
     }

@@ -98,6 +98,7 @@ data class EditorUiState(
     val autoName: Boolean = true, val pendingExport: PendingExport? = null,
     /** Nothing Glyph master switch + whether this device actually has Glyphs. */
     val glyph: Boolean = false, val glyphAvailable: Boolean = false,
+    val glyphStatus: String = "",
     val screen: Screen = Screen.LIBRARY
 ) {
     /** Logical lines in the document (LF count + 1 for a non-empty body). */

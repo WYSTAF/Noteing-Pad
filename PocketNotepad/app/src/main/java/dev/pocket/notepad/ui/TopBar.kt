@@ -1,18 +1,17 @@
 package dev.pocket.notepad.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.pocket.notepad.model.EditorUiState
-import dev.pocket.notepad.model.Limits
 import dev.pocket.notepad.model.ThemeMode
 
 // Nothing-style chrome (skill: nothing-design): uppercase micro-labels, square
@@ -26,7 +25,7 @@ fun TopBar(
     onLineNumbers: (Boolean) -> Unit, onAutoName: (Boolean) -> Unit,
     onMarkdown: () -> Unit,
     markdownBarOpen: Boolean = false,
-    glyphOn: Boolean, glyphAvailable: Boolean, onToggleGlyph: (Boolean) -> Unit,
+    glyphOn: Boolean, glyphStatus: String, onToggleGlyph: (Boolean) -> Unit,
     frameStats: Pair<Int, Int>? = null
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -74,10 +73,21 @@ fun TopBar(
                         trailingIcon = { MechanicalToggle(on = state.autoName) },
                         onClick = { onAutoName(!state.autoName) })
                     HorizontalDivider()
-                    // Nothing Glyph master switch (Phone 2a strips, 3/4a matrix).
-                    DropdownMenuItem(text = { Text("Glyph lights") },
+                    // Nothing Glyph master switch + live hardware/debug diagnostic status.
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text("Glyph lights")
+                                if (glyphStatus.isNotEmpty()) {
+                                    Text(glyphStatus,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        },
                         trailingIcon = { MechanicalToggle(on = glyphOn) },
-                        onClick = { onToggleGlyph(!glyphOn) })
+                        onClick = { onToggleGlyph(!glyphOn) }
+                    )
                     HorizontalDivider()
                     // Diagnostics only — tuning dials are gone.
                     DropdownMenuItem(enabled = false,
@@ -103,17 +113,65 @@ fun TopBar(
                 }
             }
         }
-        // Static full-width action row: buttons evenly span edge-to-edge
-        // with no awkward empty space on the right of undo and redo.
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            SquareButton("PASTE", EditorSymbol.PASTE, available, modifier = Modifier.weight(1.15f), action = onPaste)
-            SquareButton("SHARE", EditorSymbol.SHARE, available, modifier = Modifier.weight(1.15f), action = onShare)
-            SquareButton("MD", EditorSymbol.ADD, available, modifier = Modifier.weight(1.0f), filled = markdownBarOpen, action = onMarkdown)
-            SquareButton(EditorSymbol.UNDO, "Undo", available && state.canUndo, modifier = Modifier.weight(0.85f), action = onUndo)
-            SquareButton(EditorSymbol.REDO, "Redo", available && state.canRedo, modifier = Modifier.weight(0.85f), action = onRedo)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
+        // Full-screen edge-to-edge action strip: zero horizontal side gaps.
+        Row(
+            Modifier.fillMaxWidth().height(44.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ActionBarCell("PASTE", EditorSymbol.PASTE, available, modifier = Modifier.weight(1.2f), action = onPaste)
+            VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
+            ActionBarCell("SHARE", EditorSymbol.SHARE, available, modifier = Modifier.weight(1.2f), action = onShare)
+            VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
+            ActionBarCell("MD", EditorSymbol.ADD, available, modifier = Modifier.weight(1.0f), filled = markdownBarOpen, action = onMarkdown)
+            VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
+            ActionBarCell(null, EditorSymbol.UNDO, available && state.canUndo, modifier = Modifier.weight(0.8f), description = "Undo", action = onUndo)
+            VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
+            ActionBarCell(null, EditorSymbol.REDO, available && state.canRedo, modifier = Modifier.weight(0.8f), description = "Redo", action = onRedo)
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
+    }
+}
+
+@Composable
+private fun ActionBarCell(
+    label: String?,
+    icon: EditorSymbol,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    filled: Boolean = false,
+    description: String = label ?: "",
+    action: () -> Unit
+) {
+    val scheme = MaterialTheme.colorScheme
+    val ink = scheme.onBackground
+    val paper = scheme.background
+    val contentColor = when {
+        !enabled -> scheme.onSurfaceVariant.copy(alpha = 0.45f)
+        filled -> paper
+        else -> ink
+    }
+    Row(
+        modifier = modifier
+            .fillMaxHeight()
+            .background(if (filled && enabled) ink else Color.Transparent)
+            .clickable(enabled = enabled, onClick = action)
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        CompositionLocalProvider(LocalContentColor provides contentColor) {
+            EditorIcon(icon, description)
+            if (label != null) {
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    label,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
+        }
     }
 }

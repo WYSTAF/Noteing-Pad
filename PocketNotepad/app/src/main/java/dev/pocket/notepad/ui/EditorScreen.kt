@@ -24,9 +24,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.graphics.Color
 import dev.pocket.notepad.NotepadViewModel
 import dev.pocket.notepad.data.SafFiles
 import dev.pocket.notepad.model.Limits
+import dev.pocket.notepad.model.MarkdownAction
 import dev.pocket.notepad.model.Screen
 import java.text.NumberFormat
 import kotlinx.coroutines.flow.collect
@@ -42,11 +46,15 @@ fun EditorScreen(model: NotepadViewModel) {
     var renameDialog by rememberSaveable { mutableStateOf(false) }
     var shareFormatDialog by rememberSaveable { mutableStateOf(false) }
     var markdownBarOpen by rememberSaveable { mutableStateOf(false) }
+    var markdownPreview by rememberSaveable { mutableStateOf(false) }
     // Last completed scroll gesture: (fps, dropped frames). Not saved — resets
     // on recomposition so a stale number can't mislead the next experiment.
     var frameStats by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var confirmEmptyTrash by rememberSaveable { mutableStateOf(false) }
     var pendingImportUri by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.screen, state.noteId) {
+        if (state.screen != Screen.EDITOR) markdownPreview = false
+    }
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) result.data?.data?.let { uri ->
             pendingImportUri = uri.toString()
@@ -62,10 +70,10 @@ fun EditorScreen(model: NotepadViewModel) {
         }
     }
     val requestExport: () -> Unit = { if (!model.blocked) exportDialog = true }
-    // Physical Back: editor or trash return to the library (flushing the
-    // autosave); on the library itself the app exits, as before.
+    // Physical Back: preview returns to editor; editor or trash return to library.
     BackHandler(enabled = state.screen != Screen.LIBRARY && !model.blocked) {
-        model.backToLibrary()
+        if (state.screen == Screen.EDITOR && markdownPreview) markdownPreview = false
+        else model.backToLibrary()
     }
     LaunchedEffect(model) { model.messages.collect { snackbars.showSnackbar(it) } }
     // Queue picker results until restoration finishes, including process recreation.
@@ -99,15 +107,31 @@ fun EditorScreen(model: NotepadViewModel) {
                     { pendingErase = it }, { confirmEmptyTrash = true },
                     Modifier.fillMaxWidth().weight(1f))
                 Screen.EDITOR -> {
-                    TopBar(state, model::backToLibrary, { renameDialog = true },
+                    TopBar(state, {
+                            if (markdownPreview) markdownPreview = false
+                            else model.backToLibrary()
+                        }, { renameDialog = true },
                         model::paste, { if (!model.blocked) shareFormatDialog = true },
                         model::undo, model::redo, requestExport,
                         model::setTheme, model::setLineNumbers, model::setAutoName,
-                        { markdownBarOpen = !markdownBarOpen },
+                        {
+                            if (markdownPreview && markdownBarOpen) {
+                                markdownPreview = false
+                            } else {
+                                markdownBarOpen = !markdownBarOpen
+                            }
+                        },
                         markdownBarOpen,
-                        state.glyph, state.glyphAvailable, model::setGlyphEnabled, frameStats)
+                        state.glyph, state.glyphStatus, model::setGlyphEnabled, frameStats)
                     if (markdownBarOpen) {
-                        MarkdownToolbar(onSnippet = { snippet -> model.insertMarkdown(snippet) })
+                        MarkdownToolbar(
+                            previewMode = markdownPreview,
+                            onTogglePreview = { markdownPreview = !markdownPreview },
+                            onAction = { action ->
+                                if (markdownPreview) markdownPreview = false
+                                model.applyMarkdown(action)
+                            }
+                        )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
                     }
                     if (state.busy) {
@@ -123,11 +147,19 @@ fun EditorScreen(model: NotepadViewModel) {
                             TextButton(onClick = { model.finishExport(null) }) { Text("CANCEL EXPORT") }
                         }
                     }
-                    // Hardware-keyboard shortcuts: Ctrl+S export, Ctrl+N new note,
-                    // Ctrl+O import. Autosave makes an in-editor new note lossless.
-                    NativeEditor(model, state, Modifier.fillMaxWidth().weight(1f), requestExport,
-                        model::newNote, requestImport,
-                        onScrollStats = { fps, long -> frameStats = fps to long })
+                    if (markdownPreview) {
+                        MarkdownPreview(
+                            source = state.root.toString(),
+                            onToggleTask = model::toggleMarkdownTask,
+                            modifier = Modifier.fillMaxWidth().weight(1f)
+                        )
+                    } else {
+                        // Hardware-keyboard shortcuts: Ctrl+S export, Ctrl+N new note,
+                        // Ctrl+O import. Autosave makes an in-editor new note lossless.
+                        NativeEditor(model, state, Modifier.fillMaxWidth().weight(1f), requestExport,
+                            model::newNote, requestImport,
+                            onScrollStats = { fps, long -> frameStats = fps to long })
+                    }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
                     val numbers = remember { NumberFormat.getIntegerInstance() }
                     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
@@ -195,47 +227,80 @@ fun EditorScreen(model: NotepadViewModel) {
 }
 
 /**
- * Quick inline Markdown formatting bar (Nothing-style):
- * Replaces the disruptive modal dialog with an immediate, non-intrusive toolbar.
- * Users can format headings, bold, bullet points, alignment markers, code, etc.
- * right while typing without dismissing focus or keyboard.
+ * Quick inline Markdown formatting & preview bar (Nothing-style):
+ * Left-pinned PREVIEW / EDIT switch + edge-to-edge smart formatting bar.
+ * Wraps selections cleanly, toggles prefixes, and places the caret inside markers.
  */
 @Composable
-fun MarkdownToolbar(onSnippet: (String) -> Unit) {
+fun MarkdownToolbar(
+    previewMode: Boolean,
+    onTogglePreview: () -> Unit,
+    onAction: (MarkdownAction) -> Unit
+) {
     val items = listOf(
-        "H1" to "# ",
-        "H2" to "## ",
-        "H3" to "### ",
-        "B" to "****",
-        "I" to "**",
-        "•" to "• ",
-        "1." to "1. ",
-        "[ ]" to "- [ ] ",
-        "\"" to "> ",
-        "<>" to "```\n\n```",
-        "CENTER" to "<!--align:center-->\n\n<!--/align-->",
-        "RIGHT" to "<!--align:right-->\n\n<!--/align-->",
-        "LINK" to "[label](https://)",
-        "TABLE" to "| Col 1 | Col 2 |\n|---|---|\n|   |   |\n",
-        "---" to "---\n"
+        "B" to MarkdownAction.BOLD,
+        "I" to MarkdownAction.ITALIC,
+        "S" to MarkdownAction.STRIKE,
+        "H1" to MarkdownAction.H1,
+        "H2" to MarkdownAction.H2,
+        "H3" to MarkdownAction.H3,
+        "•" to MarkdownAction.BULLET,
+        "1." to MarkdownAction.NUMBERED,
+        "[ ]" to MarkdownAction.CHECKLIST,
+        "\"" to MarkdownAction.QUOTE,
+        "</>" to MarkdownAction.CODE,
+        "ALIGN L" to MarkdownAction.ALIGN_LEFT,
+        "CENTER" to MarkdownAction.ALIGN_CENTER,
+        "ALIGN R" to MarkdownAction.ALIGN_RIGHT,
+        "LINK" to MarkdownAction.LINK,
+        "TABLE" to MarkdownAction.TABLE,
+        "---" to MarkdownAction.DIVIDER
     )
+    val scheme = MaterialTheme.colorScheme
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+            .height(40.dp)
+            .background(scheme.surface),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        items.forEach { (label, snippet) ->
-            SquareButton(
-                onClick = { onSnippet(snippet) },
-                enabled = true,
-                filled = false,
-                modifier = Modifier.heightIn(min = 32.dp)
-            ) {
-                Text(label, style = MaterialTheme.typography.labelSmall)
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .background(if (previewMode) Color(0xFFD92C35) else scheme.onBackground)
+                .clickable(onClick = onTogglePreview)
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = if (previewMode) "EDIT" else "PREVIEW",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (previewMode) Color.White else scheme.background,
+                maxLines = 1,
+                softWrap = false
+            )
+        }
+        VerticalDivider(color = scheme.outlineVariant, thickness = 1.dp)
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            items.forEach { (label, action) ->
+                Box(
+                    modifier = Modifier
+                        .height(30.dp)
+                        .border(1.dp, scheme.outlineVariant)
+                        .clickable { onAction(action) }
+                        .padding(horizontal = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
+                }
             }
         }
     }

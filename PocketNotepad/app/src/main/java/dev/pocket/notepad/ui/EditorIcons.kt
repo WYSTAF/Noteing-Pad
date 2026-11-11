@@ -135,28 +135,35 @@ internal fun parseSegments(d: String, strict: Boolean = false): List<Seg> {
                 out += Seg('M', floatArrayOf(cx, cy))
                 while (numsAhead(2)) {
                     val lx = num(); val ly = num()
-                    cx += lx; cy += ly
+                    cx = if (relative) cx + lx else lx
+                    cy = if (relative) cy + ly else ly
                     out += Seg('L', floatArrayOf(cx, cy))
                 }
             }
             'L' -> {
                 if (!room(2)) { if (strict) error("truncated lineto") else return out }
-                val x = num(); val y = num()
-                cx = if (relative) cx + x else x
-                cy = if (relative) cy + y else y
-                out += Seg('L', floatArrayOf(cx, cy))
+                do {
+                    val x = num(); val y = num()
+                    cx = if (relative) cx + x else x
+                    cy = if (relative) cy + y else y
+                    out += Seg('L', floatArrayOf(cx, cy))
+                } while (numsAhead(2))
             }
             'H' -> {
                 if (!room(1)) { if (strict) error("truncated h") else return out }
-                val x = num()
-                cx = if (relative) cx + x else x
-                out += Seg('H', floatArrayOf(cx))
+                do {
+                    val x = num()
+                    cx = if (relative) cx + x else x
+                    out += Seg('H', floatArrayOf(cx))
+                } while (numsAhead(1))
             }
             'V' -> {
                 if (!room(1)) { if (strict) error("truncated v") else return out }
-                val y = num()
-                cy = if (relative) cy + y else y
-                out += Seg('V', floatArrayOf(cy))
+                do {
+                    val y = num()
+                    cy = if (relative) cy + y else y
+                    out += Seg('V', floatArrayOf(cy))
+                } while (numsAhead(1))
             }
             'C' -> {
                 if (!room(6)) { if (strict) error("truncated curveto") else return out }

@@ -17,19 +17,21 @@ files on your device; nothing leaves it.
 ## Features
 
 - **Write first** — opens straight into the library; one tap to a blank note.
-  Plain text only, on purpose: no rendering, no formatting chrome, no nonsense.
+  Plain text with an optional inline Markdown toolbar & live preview (headings,
+  bold, italic, strikethrough, code blocks, alignment markers, tables, and
+  interactive task checkboxes).
 - **Autosave + auto-name** — every edit persists to local storage (debounced);
   the first line names the note until you rename it yourself.
 - **Real Save As** — export or share as `.txt`, `.md`, or PDF through the
   system file picker. Import any UTF-8 text file the same way.
-- **Swipe to trash** — flick a note left in the library; deleted notes rest in
-  a trash screen for 30 days before final erase, restorable until then.
-- **Nothing Glyph** — on Nothing phones, the Glyph strip mirrors where you are
-  in the document, fills like a meter while saving, and blinks on export.
-  A master switch lives in the editor menu (hidden on non-Nothing hardware).
-- **Editor craft** — line numbers drawn in the same canvas pass as the text
-  (they can never lag a scroll frame), quintic-fling scrolling tuned at
-  120 Hz, a draggable scroll thumb, and undo/redo with full history.
+- **Swipe to trash** — flick a note left in the library with tactile haptic
+  feedback; deleted notes rest in a trash screen for 30 days before final erase.
+- **Nothing Glyph & Matrix** — model-specific indicators for Phone (1)/(2),
+  (2a)/(2a+)/(3a), (4a)/(4b), and (3)/(4a Pro) Matrix: scroll progress, rising
+  save meter, top-down share drain, delete double-blink, and back/new pulses.
+- **Editor craft** — hardware-cached 120 Hz text scrolling with OverScroller
+  momentum, zero-lag synchronized line numbers, draggable scroll thumb, and
+  undo/redo with full history.
 - **Custom icon set** — every icon is hand-drawn 1024×1024 SVG geometry
   (sources in this repo), ported stroke-exact into Canvas with a single
   #d92c35 accent per mark.
@@ -56,7 +58,7 @@ Requirements: Android Studio, JDK 17, an Android SDK with platform 35.
 ```bash
 cd PocketNotepad
 ./gradlew assembleDebug        # app-debug.apk
-./gradlew testDebugUnitTest    # 25 JVM tests
+./gradlew testDebugUnitTest    # 36 JVM tests
 ```
 
 The Nothing Glyph SDK ships in `app/libs/glyph-sdk-2.0.aar`, so no extra

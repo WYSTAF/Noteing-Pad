@@ -67,6 +67,13 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
             }
         }
         viewModelScope.launch {
+            GlyphSupport.statusFlow.collect { status ->
+                _ui.update {
+                    it.copy(glyphStatus = status)
+                }
+            }
+        }
+        viewModelScope.launch {
             try {
                 GlyphSupport.init(getApplication())
                 GlyphSupport.setEnabled(preferences.getBoolean("glyph", true))
@@ -84,7 +91,8 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
                     it.copy(theme = options.theme, lineNumbers = options.lineNumbers,
                         autoName = options.autoName,
                         glyph = preferences.getBoolean("glyph", true),
-                        glyphAvailable = GlyphSupport.available)
+                        glyphAvailable = GlyphSupport.available,
+                        glyphStatus = GlyphSupport.statusFlow.value)
                 }
                 val pending = restorePending()
                 exporter.cleanOrphans(pending?.stageName)
@@ -116,12 +124,6 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
     fun notify(message: String) { messageChannel.trySend(message) }
     fun select(start: Int, end: Int) {
         selection = Selection(start, end).bounded(_ui.value.root.length)
-        // Mirror the caret's place in the note to the Glyph in real time.
-        val total = _ui.value.root.length
-        if (total > 0) {
-            val percent = (end * 100 / total).coerceIn(0, 100)
-            GlyphSupport.onScrollProgress(percent)
-        }
     }
 
     /** Called synchronously by the native editor; only inserted text is copied. */
@@ -131,13 +133,19 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
         return _ui.value.revision
     }
 
-    private fun commit(start: Int, end: Int, inserted: Rope, beforeSelection: Selection = selection) {
+    private fun commit(
+        start: Int,
+        end: Int,
+        inserted: Rope,
+        beforeSelection: Selection = selection,
+        afterSelectionOverride: Selection? = null
+    ) {
         if (start == end && inserted.isEmpty()) return
         val state = _ui.value
         require(state.root.length - (end - start) + inserted.length <= Limits.MAX_CHARACTERS) { Limits.SIZE_MESSAGE }
         val removed = state.root.subSequence(start, end)
         val next = state.root.replace(start, end, inserted)
-        val afterSelection = Selection(start + inserted.length)
+        val afterSelection = (afterSelectionOverride ?: Selection(start + inserted.length)).bounded(next.length)
         history.record(Edit(state.root, next, start, removed, inserted, beforeSelection, afterSelection))
         selection = afterSelection
         val newTitle = if (state.autoName && !state.titleIsManual) autoTitle(next) else state.title
@@ -184,11 +192,38 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
     }
 
     /**
-     * Inserts a Markdown building block at the caret, replacing any selection.
-     * The app is a plain-text editor on purpose (no renderer), so these insert
-     * Markdown SOURCE — the same bytes a .md file would contain — for a file
-     * that is (or becomes) .md.
+     * Applies a Markdown formatting action cleanly around the current selection
+     * or current line, preserving smart caret placement.
      */
+    fun applyMarkdown(action: MarkdownAction) {
+        if (blocked) return
+        val state = _ui.value
+        val edit = MarkdownLogic.computeEdit(state.root, selection, action)
+        val delta = edit.replacement.length - (edit.replaceEnd - edit.replaceStart)
+        if (state.root.length + delta > Limits.MAX_CHARACTERS) {
+            notify(Limits.SIZE_MESSAGE)
+            return
+        }
+        commit(
+            start = edit.replaceStart,
+            end = edit.replaceEnd,
+            inserted = Rope.of(edit.replacement),
+            beforeSelection = selection,
+            afterSelectionOverride = edit.nextSelection
+        )
+    }
+
+    /** Toggles a [ ] / [x] task checkbox directly from Markdown Preview. */
+    fun toggleMarkdownTask(bracketOffset: Int) {
+        if (blocked) return
+        val root = _ui.value.root
+        if (bracketOffset !in 0 until root.length) return
+        val current = root[bracketOffset]
+        if (current != ' ' && current != 'x' && current != 'X') return
+        val nextChar = if (current == ' ') "x" else " "
+        commit(bracketOffset, bracketOffset + 1, Rope.of(nextChar), selection, selection)
+    }
+
     fun insertMarkdown(snippet: String) {
         if (blocked) return
         val chosen = selection.bounded(_ui.value.root.length)
@@ -228,8 +263,9 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
                 savedRope = draft.root
                 selection = draft.selection.bounded(draft.root.length)
                 history.clear()
+                val isManual = draft.root.isNotEmpty() && draft.title != autoTitle(draft.root)
                 _ui.value = _ui.value.copy(root = draft.root, title = draft.title, noteId = draft.noteId,
-                    titleIsManual = false,
+                    titleIsManual = isManual,
                     revision = _ui.value.revision + 1, patch = null, canUndo = false, canRedo = false,
                     screen = Screen.EDITOR)
             } catch (failure: Exception) {
@@ -250,7 +286,7 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
                 notify("Library refresh failed: ${friendly(failure)}")
             }
         }
-        _ui.update { it.copy(screen = Screen.LIBRARY) }
+        _ui.update { it.copy(screen = Screen.LIBRARY, noteId = "") }
     }
 
     private fun refreshNotes() {
@@ -394,18 +430,31 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
 
     fun importFile(uri: Uri) {
         if (blocked) return
+        flushPendingSave()
         _ui.update { it.copy(busy = true, activity = "Importing UTF-8 text") }
         viewModelScope.launch {
             try {
                 val draft = repository.importAsNote(uri)
-                newNote()
-                val id = _ui.value.noteId
+                val id = repository.nextId()
                 savedRope = draft.root
                 selection = draft.selection.bounded(draft.root.length)
                 history.clear()
-                _ui.value = _ui.value.copy(root = draft.root,
-                    title = if (_ui.value.autoName) autoTitle(draft.root) else draft.title,
-                    noteId = id, revision = _ui.value.revision + 1, patch = null)
+                val title = if (_ui.value.autoName) {
+                    val auto = autoTitle(draft.root)
+                    if (auto == "Untitled" && draft.title.isNotBlank()) draft.title else auto
+                } else draft.title
+                _ui.value = _ui.value.copy(
+                    root = draft.root,
+                    title = title,
+                    noteId = id,
+                    titleIsManual = !_ui.value.autoName,
+                    revision = _ui.value.revision + 1,
+                    patch = null,
+                    canUndo = false,
+                    canRedo = false,
+                    screen = Screen.EDITOR
+                )
+                GlyphSupport.onNew()
                 requestSave()
             } catch (failure: Exception) {
                 if (failure is CancellationException) throw failure
@@ -468,11 +517,14 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
         _ui.update { it.copy(busy = true, activity = if (spec.isPdf) "Preparing PDF" else "Preparing UTF-8 file") }
         viewModelScope.launch {
             try {
+                GlyphSupport.onSaveProgress(20)
                 // Flush storage before another activity takes focus.
-                persist(makeDraft())
+                persist(makeDraft(), quiet = true)
                 val name = exporter.stage(source.root, spec) { page ->
                     _ui.update { it.copy(activity = "Preparing PDF, page $page") }
+                    GlyphSupport.onSaveProgress((20 + page * 5).coerceAtMost(75))
                 }
+                GlyphSupport.onSaveProgress(80)
                 val pending = PendingExport(name, spec, source.revision, session, noteId = source.noteId)
                 storePending(pending)
                 _ui.update { it.copy(pendingExport = pending) }
@@ -503,6 +555,7 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
             _ui.update { it.copy(busy = true, activity = if (uri == null) "Canceling export" else "Writing file") }
             try {
                 if (uri != null) {
+                    GlyphSupport.onSaveProgress(90)
                     val actualName = exporter.publish(pending, uri)
                     val state = _ui.value
                     if (!pending.spec.isPdf && pending.session == session && pending.sourceRevision == state.revision) {
@@ -515,7 +568,9 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
                     } else if (actualName == null) {
                         notify("File saved. This provider did not return a display name; verify the extension in Files.")
                     } else notify("Saved $actualName")
-                    GlyphSupport.blink()
+                    GlyphSupport.onSaveDone()
+                } else {
+                    GlyphSupport.turnOff()
                 }
             } catch (failure: Exception) {
                 if (failure is CancellationException) throw failure
@@ -539,7 +594,7 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
     /** Nothing Glyph master switch, persisted and reflected in observable state. */
     fun setGlyphEnabled(on: Boolean) {
         preferences.edit().putBoolean("glyph", on).apply()
-        GlyphSupport.setEnabled(on)
+        GlyphSupport.setEnabled(on, triggerPulse = on)
         _ui.update { it.copy(glyph = on) }
     }
 
@@ -590,14 +645,14 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
         if (!initialized) return
         flushPendingSave()
     }
-    private suspend fun persist(draft: Draft) {
+    private suspend fun persist(draft: Draft, quiet: Boolean = false) {
         if (draft.noteId.isEmpty()) return
         try {
-            GlyphSupport.onSaveProgress(10)
+            if (!quiet) GlyphSupport.onSaveProgress(20)
             repository.saveNote(draft)
             savedRope = draft.root
             saveFailureReported = false
-            GlyphSupport.onSaveDone()
+            if (!quiet) GlyphSupport.onSaveDone()
         } catch (failure: Exception) {
             if (failure is CancellationException) throw failure
             if (!saveFailureReported) {

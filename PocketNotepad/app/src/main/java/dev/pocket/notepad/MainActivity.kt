@@ -10,6 +10,7 @@ import androidx.activity.viewModels
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.pocket.notepad.glyph.GlyphSupport
 import dev.pocket.notepad.ui.EditorScreen
 import dev.pocket.notepad.ui.theme.NotepadTheme
 import dev.pocket.notepad.ui.theme.useDarkTheme
@@ -31,8 +32,13 @@ class MainActivity : ComponentActivity() {
             NotepadTheme(dark) { EditorScreen(model) }
         }
     }
+    override fun onStart() {
+        super.onStart()
+        GlyphSupport.onForeground(this)
+    }
     override fun onStop() {
         model.flushForStop()
+        GlyphSupport.onBackground()
         super.onStop()
     }
 }

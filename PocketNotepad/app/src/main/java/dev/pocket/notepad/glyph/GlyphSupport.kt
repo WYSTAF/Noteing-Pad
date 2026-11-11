@@ -1,49 +1,33 @@
 package dev.pocket.notepad.glyph
 
+import android.content.ComponentName
 import android.content.Context
 import android.graphics.Typeface
 import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import com.nothing.ketchum.Common
-import com.nothing.ketchum.Glyph
 import com.nothing.ketchum.GlyphManager
 import com.nothing.ketchum.GlyphMatrixManager
-import com.nothing.ketchum.GlyphMatrixUtils
 import kotlinx.coroutines.flow.MutableStateFlow
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 /**
- * Nothing Glyph integration — official GDK (com.nothing.ketchum, vendored at
- * app/libs/glyph-sdk-2.0.aar).
+ * Nothing Glyph & Glyph Matrix engine — official GDK (com.nothing.ketchum,
+ * vendored at app/libs/glyph-sdk-2.0.aar).
  *
- * SPECIALIZED HARDWARE GROUPS:
- *   1. Phone (1) [A063 / 20111], Phone (2) [A065 / 22111]
- *      -> Classic multi-zone interface (Phone 1: 16 zones, Phone 2: 33 zones with C1 16-seg arc)
- *   2. Phone (2a / 2a+) [A142/A142P / 23111/23113], Phone (3a / 3a Pro) [A059 / 24111]
- *      -> 2a circular C-ring (24 addressable segments C_1..C_24 around camera + B ring + A slash)
- *         and 3a 20-segment arc
- *   3. Phone (4a) [A069 / 25111], Phone (4b) [A009P / 25131]
- *      -> Sleek compact multi-segment indicator strip (A_1..A_6 / A_1..A_4)
- *   4. Phone (3) [A024 / 23112], Phone (4a Pro) [A069P / 25111p]
- *      -> High-density Glyph LED Matrix displays
+ * All IPC calls and multi-frame animations execute on a dedicated single-thread
+ * executor (never blocking the main UI thread or stalling scroll frames).
  */
 object GlyphSupport {
 
     private const val TAG = "GlyphSupport"
-    const val MAX_LIGHT = 4000
-    const val MED_LIGHT = 2000
-    const val LOW_LIGHT = 1000
-    const val OFF = 0
+    private const val SCROLL_IDLE_FADE_MS = 1200L
 
-    enum class Hardware { INTERFACE, MATRIX, UNKNOWN }
-    enum class ModelGroup { PHONE_1_2, PHONE_2A_3A, PHONE_4A_4B, MATRIX, GENERIC }
-
-    @Volatile var hardware: Hardware = Hardware.UNKNOWN
-        private set
-
-    @Volatile var modelGroup: ModelGroup = ModelGroup.GENERIC
-        private set
-
-    @Volatile var targetDeviceCode: String = ""
+    @Volatile var model: NothingModel = NothingModel.UNKNOWN
         private set
 
     @Volatile var enabled: Boolean = true
@@ -53,442 +37,512 @@ object GlyphSupport {
         private set
 
     val availableFlow = MutableStateFlow(false)
+    val statusFlow = MutableStateFlow("NOT CHECKED")
 
+    private var appContext: Context? = null
     private var glyphManager: GlyphManager? = null
     private var matrixManager: GlyphMatrixManager? = null
+    private var serviceBound = false
     private var sessionOpen = false
-    private var initialised = false
-    private var totalChannels: Int = 26
 
-    fun setEnabled(on: Boolean) {
+    private val worker = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "GlyphWorker").apply { isDaemon = true }
+    }
+    private val idleScheduler = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "GlyphIdle").apply { isDaemon = true }
+    }
+    private val animGen = AtomicLong(0L)
+    @Volatile private var lastScrollPercent = -1
+    @Volatile private var pendingIdleFade: ScheduledFuture<*>? = null
+
+    fun setEnabled(on: Boolean, triggerPulse: Boolean = false) {
         enabled = on
-        if (!on) turnOff()
+        if (!on) {
+            lastScrollPercent = -1
+            cancelIdleFade()
+            animGen.incrementAndGet()
+            turnOff()
+        } else {
+            val ctx = appContext
+            if (ctx != null && !available && model != NothingModel.UNKNOWN) {
+                retryRegisterOrBind(ctx)
+            }
+            if (triggerPulse && available) {
+                onTestPulse()
+            }
+        }
     }
 
     fun init(context: Context) {
-        if (initialised) return
-        initialised = true
+        val app = context.applicationContext
+        appContext = app
+        if (serviceBound && available) return
+
         try {
-            val m = (Build.MODEL ?: "").uppercase()
-            val b = (Build.BRAND ?: "").uppercase()
-            val f = (Build.MANUFACTURER ?: "").uppercase()
-            val isNothing = b.contains("NOTHING") || f.contains("NOTHING") || m.contains("NOTHING") || m.contains("A0") || m.contains("A1")
-
-            when {
-                // Group 4: Matrix devices
-                Common.is23112() || m.contains("A024") || (isNothing && m.contains("PHONE (3)")) -> {
-                    hardware = Hardware.MATRIX
-                    modelGroup = ModelGroup.MATRIX
-                    targetDeviceCode = Glyph.DEVICE_23112
-                }
-                Common.is25111p() || m.contains("A069P") || (isNothing && m.contains("4A PRO")) -> {
-                    hardware = Hardware.MATRIX
-                    modelGroup = ModelGroup.MATRIX
-                    targetDeviceCode = Glyph.DEVICE_25111p
-                }
-
-                // Group 2: Phone (2a / 2a Plus) and (3a / 3a Pro)
-                Common.is23111() || m.contains("A142") || (isNothing && m.contains("2A") && !m.contains("2A+")) -> {
-                    hardware = Hardware.INTERFACE
-                    modelGroup = ModelGroup.PHONE_2A_3A
-                    targetDeviceCode = Glyph.DEVICE_23111 // "A142"
-                    totalChannels = 26
-                }
-                Common.is23113() || m.contains("A142P") || (isNothing && (m.contains("2A+") || m.contains("2A PLUS"))) -> {
-                    hardware = Hardware.INTERFACE
-                    modelGroup = ModelGroup.PHONE_2A_3A
-                    targetDeviceCode = Glyph.DEVICE_23113 // "A142P"
-                    totalChannels = 26
-                }
-                Common.is24111() || m.contains("A059") || (isNothing && m.contains("3A")) -> {
-                    hardware = Hardware.INTERFACE
-                    modelGroup = ModelGroup.PHONE_2A_3A
-                    targetDeviceCode = Glyph.DEVICE_24111 // "A059"
-                    totalChannels = 36
-                }
-
-                // Group 1: Phone (1) and Phone (2)
-                Common.is20111() || m.contains("A063") || (isNothing && (m.contains("PHONE (1)") || m == "PHONE 1")) -> {
-                    hardware = Hardware.INTERFACE
-                    modelGroup = ModelGroup.PHONE_1_2
-                    targetDeviceCode = Glyph.DEVICE_20111 // "A063"
-                    totalChannels = 16
-                }
-                Common.is22111() || m.contains("A065") || m.contains("AIN065") || (isNothing && (m.contains("PHONE (2)") || m == "PHONE 2")) -> {
-                    hardware = Hardware.INTERFACE
-                    modelGroup = ModelGroup.PHONE_1_2
-                    targetDeviceCode = Glyph.DEVICE_22111 // "A065"
-                    totalChannels = 33
-                }
-
-                // Group 3: Phone (4a) and Phone (4b)
-                Common.is25111() || m.contains("A069") || (isNothing && m.contains("4A")) -> {
-                    hardware = Hardware.INTERFACE
-                    modelGroup = ModelGroup.PHONE_4A_4B
-                    targetDeviceCode = Glyph.DEVICE_25111 // "A069"
-                    totalChannels = 6
-                }
-                Common.is25131() || m.contains("A009P") || (isNothing && m.contains("4B")) -> {
-                    hardware = Hardware.INTERFACE
-                    modelGroup = ModelGroup.PHONE_4A_4B
-                    targetDeviceCode = Glyph.DEVICE_25131 // "A009P"
-                    totalChannels = 4
-                }
-
-                isNothing -> {
-                    // Fallback for general Nothing devices (treat as 2a circular interface)
-                    hardware = Hardware.INTERFACE
-                    modelGroup = ModelGroup.PHONE_2A_3A
-                    targetDeviceCode = Glyph.DEVICE_23111
-                    totalChannels = 26
-                }
-                else -> {
-                    hardware = Hardware.UNKNOWN
-                    modelGroup = ModelGroup.GENERIC
-                }
+            val detected = NothingModel.detect(
+                model = Build.MODEL ?: "",
+                brand = Build.BRAND ?: "",
+                manufacturer = Build.MANUFACTURER ?: "",
+                sdkIs20111 = Common.is20111(),
+                sdkIs22111 = Common.is22111(),
+                sdkIs23111 = Common.is23111(),
+                sdkIs23113 = Common.is23113(),
+                sdkIs24111 = Common.is24111(),
+                sdkIs23112 = Common.is23112(),
+                sdkIs25111 = Common.is25111(),
+                sdkIs25111p = Common.is25111p(),
+                sdkIs25131 = Common.is25131()
+            )
+            model = detected
+            if (detected == NothingModel.UNKNOWN) {
+                available = false
+                availableFlow.value = false
+                statusFlow.value = "NO GLYPH HARDWARE"
+                return
             }
+            if (serviceBound) {
+                // Already bound; retry registration if not yet authorized
+                retryRegisterOrBind(app)
+                return
+            }
+            serviceBound = true
+            statusFlow.value = "${detected.displayName.uppercase()} · CONNECTING"
 
-            if (hardware == Hardware.UNKNOWN) return
-            val app = context.applicationContext
-
-            if (hardware == Hardware.INTERFACE) {
+            if (!detected.isMatrix) {
                 val manager = GlyphManager.getInstance(app)
                 glyphManager = manager
                 manager.init(object : GlyphManager.Callback {
-                    override fun onServiceConnected(name: android.content.ComponentName?) {
-                        Log.i(TAG, "glyph service connected for $targetDeviceCode")
-                        var reg = if (targetDeviceCode.isNotEmpty()) {
-                            runCatching { manager.register(targetDeviceCode) }.getOrDefault(false)
-                        } else false
-                        if (!reg) {
-                            reg = runCatching { manager.register() }.getOrDefault(false)
+                    override fun onServiceConnected(name: ComponentName?) {
+                        Log.i(TAG, "Glyph service connected for ${detected.displayName} (${detected.deviceCode})")
+                        worker.execute {
+                            authorizeInterface(app, manager, detected)
                         }
-                        Log.i(TAG, "glyph registration result=$reg")
-                        available = reg
-                        availableFlow.value = reg
                     }
-                    override fun onServiceDisconnected(name: android.content.ComponentName?) {
-                        Log.w(TAG, "glyph service disconnected")
+
+                    override fun onServiceDisconnected(name: ComponentName?) {
+                        Log.w(TAG, "Glyph service disconnected")
                         available = false
                         availableFlow.value = false
                         sessionOpen = false
+                        serviceBound = false
+                        statusFlow.value = "${detected.displayName.uppercase()} · DISCONNECTED"
                     }
                 })
             } else {
                 val manager = GlyphMatrixManager.getInstance(app)
                 matrixManager = manager
                 manager.init(object : GlyphMatrixManager.Callback {
-                    override fun onServiceConnected(name: android.content.ComponentName?) {
-                        Log.i(TAG, "matrix service connected for $targetDeviceCode")
-                        val reg = if (targetDeviceCode.isNotEmpty()) {
-                            runCatching { manager.register(targetDeviceCode) }.getOrDefault(false)
-                        } else {
-                            runCatching { manager.register(android.os.Build.MODEL) }.getOrDefault(false)
+                    override fun onServiceConnected(name: ComponentName?) {
+                        Log.i(TAG, "Matrix service connected for ${detected.displayName} (${detected.deviceCode})")
+                        worker.execute {
+                            authorizeMatrix(app, manager, detected)
                         }
-                        Log.i(TAG, "matrix registration result=$reg")
-                        available = reg
-                        availableFlow.value = reg
                     }
-                    override fun onServiceDisconnected(name: android.content.ComponentName?) {
-                        Log.w(TAG, "matrix service disconnected")
+
+                    override fun onServiceDisconnected(name: ComponentName?) {
+                        Log.w(TAG, "Matrix service disconnected")
                         available = false
                         availableFlow.value = false
+                        serviceBound = false
+                        statusFlow.value = "${detected.displayName.uppercase()} · DISCONNECTED"
                     }
                 })
             }
-            Log.i(TAG, "Glyph initialized: hardware=$hardware, group=$modelGroup, code=$targetDeviceCode, channels=$totalChannels")
         } catch (failure: Throwable) {
-            Log.w(TAG, "glyph unavailable: ${failure.message}")
+            Log.w(TAG, "Glyph init error: ${failure.message}")
             available = false
             availableFlow.value = false
+            statusFlow.value = "UNAVAILABLE"
         }
     }
 
-    // ---- Session Management ---------------------------------------------
-
-    private inline fun session(block: () -> Unit) {
-        if (!available || !enabled) return
-        try {
-            if (hardware == Hardware.INTERFACE && !sessionOpen) {
-                glyphManager?.openSession()
+    private fun authorizeInterface(app: Context, manager: GlyphManager, m: NothingModel) {
+        var reg = false
+        if (m.deviceCode.isNotEmpty()) {
+            reg = runCatching { manager.register(m.deviceCode) }.getOrDefault(false)
+        }
+        if (!reg) {
+            reg = runCatching { manager.register() }.getOrDefault(false)
+        }
+        available = reg
+        availableFlow.value = reg
+        if (reg) {
+            runCatching {
+                manager.openSession()
                 sessionOpen = true
             }
-            block()
-        } catch (failure: Throwable) {
-            Log.w(TAG, "glyph session op: ${failure.message}")
+            statusFlow.value = "${m.displayName.uppercase()} · READY"
+            Log.i(TAG, "Glyph authorized & session open for ${m.displayName}")
+        } else {
+            val debugOn = isNothingDebugEnabled(app)
+            statusFlow.value = if (debugOn == 0 && Build.VERSION.SDK_INT < 36) {
+                "${m.displayName.uppercase()} · ENABLE GLYPH DEBUG"
+            } else {
+                "${m.displayName.uppercase()} · NOT AUTHORIZED"
+            }
+            Log.w(TAG, "Glyph register returned false (model=${Build.MODEL}, debug=$debugOn)")
+        }
+    }
+
+    private fun authorizeMatrix(app: Context, manager: GlyphMatrixManager, m: NothingModel) {
+        var reg = false
+        if (m.deviceCode.isNotEmpty()) {
+            reg = runCatching { manager.register(m.deviceCode) }.getOrDefault(false)
+        }
+        if (!reg) {
+            reg = runCatching { manager.register(Build.MODEL) }.getOrDefault(false)
+        }
+        available = reg
+        availableFlow.value = reg
+        if (reg) {
+            statusFlow.value = "${m.displayName.uppercase()} · READY"
+            Log.i(TAG, "Matrix authorized for ${m.displayName}")
+        } else {
+            val debugOn = isNothingDebugEnabled(app)
+            statusFlow.value = if (debugOn == 0 && Build.VERSION.SDK_INT < 36) {
+                "${m.displayName.uppercase()} · ENABLE GLYPH DEBUG"
+            } else {
+                "${m.displayName.uppercase()} · NOT AUTHORIZED"
+            }
+            Log.w(TAG, "Matrix register returned false (model=${Build.MODEL}, debug=$debugOn)")
+        }
+    }
+
+    private fun isNothingDebugEnabled(context: Context): Int =
+        runCatching {
+            Settings.Global.getInt(context.contentResolver, "nt_glyph_interface_debug_enable", -1)
+        }.getOrDefault(-1)
+
+    private fun retryRegisterOrBind(app: Context) {
+        if (model == NothingModel.UNKNOWN) return
+        if (!serviceBound) {
+            init(app)
+            return
+        }
+        worker.execute {
+            if (!model.isMatrix) {
+                glyphManager?.let { authorizeInterface(app, it, model) }
+            } else {
+                matrixManager?.let { authorizeMatrix(app, it, model) }
+            }
+        }
+    }
+
+    /** Called from MainActivity.onStart() when app enters foreground. */
+    fun onForeground(context: Context) {
+        val app = context.applicationContext
+        appContext = app
+        if (model == NothingModel.UNKNOWN) return
+        if (!serviceBound || !available) {
+            init(app)
+            return
+        }
+        if (enabled && !model.isMatrix) {
+            worker.execute {
+                if (available && !sessionOpen) {
+                    runCatching {
+                        glyphManager?.openSession()
+                        sessionOpen = true
+                    }
+                }
+            }
+        }
+    }
+
+    /** Called from MainActivity.onStop() when app goes to background. */
+    fun onBackground() {
+        lastScrollPercent = -1
+        cancelIdleFade()
+        animGen.incrementAndGet()
+        if (!available && !sessionOpen) return
+        worker.execute {
+            turnOffInternal(closeSessionAfter = true)
+        }
+    }
+
+    // ---- Low-level Frame Delivery (always called on GlyphWorker) --------
+
+    private fun sendFrame(frame: IntArray) {
+        if (!available || !enabled || frame.isEmpty()) return
+        if (!model.isMatrix) {
+            val mgr = glyphManager ?: return
+            runCatching {
+                if (!sessionOpen) {
+                    mgr.openSession()
+                    sessionOpen = true
+                }
+                mgr.setFrameColors(frame)
+            }.onFailure {
+                // Re-try opening session once if OS reclaimed it while backgrounded
+                sessionOpen = false
+                runCatching {
+                    mgr.openSession()
+                    sessionOpen = true
+                    mgr.setFrameColors(frame)
+                }.onFailure { err ->
+                    Log.w(TAG, "Glyph frame failed: ${err.message}")
+                }
+            }
+        } else {
+            val mgr = matrixManager ?: return
+            runCatching {
+                mgr.setAppMatrixFrame(frame)
+            }.onFailure {
+                runCatching { mgr.setMatrixFrame(frame) }
+                    .onFailure { err -> Log.w(TAG, "Matrix frame failed: ${err.message}") }
+            }
+        }
+    }
+
+    private fun turnOffInternal(closeSessionAfter: Boolean) {
+        runCatching {
+            if (!model.isMatrix) {
+                val mgr = glyphManager
+                if (mgr != null && available) {
+                    if (sessionOpen) {
+                        runCatching { mgr.setFrameColors(IntArray(model.channelCount)) }
+                    }
+                    if (closeSessionAfter && sessionOpen) {
+                        sessionOpen = false
+                        runCatching { mgr.closeSession() }
+                    }
+                }
+            } else {
+                val mgr = matrixManager
+                if (mgr != null && available) {
+                    runCatching { mgr.setAppMatrixFrame(IntArray(model.channelCount)) }
+                    if (closeSessionAfter) {
+                        runCatching { mgr.closeAppMatrix() }
+                    }
+                }
+            }
         }
     }
 
     fun turnOff() {
-        runCatching {
-            if (sessionOpen) {
-                sessionOpen = false
-                glyphManager?.closeSession()
-            }
-            when (hardware) {
-                Hardware.INTERFACE -> glyphManager?.turnOff()
-                Hardware.MATRIX -> matrixManager?.turnOff()
-                Hardware.UNKNOWN -> Unit
+        lastScrollPercent = -1
+        cancelIdleFade()
+        val gen = animGen.incrementAndGet()
+        worker.execute {
+            if (animGen.get() == gen) {
+                turnOffInternal(closeSessionAfter = false)
             }
         }
     }
 
-    // ---- Specialized Model Indicators ----------------------------------
+    // ---- Idle Auto-Fade Helper ------------------------------------------
+
+    private fun cancelIdleFade() {
+        pendingIdleFade?.cancel(false)
+        pendingIdleFade = null
+    }
+
+    private fun scheduleIdleFade(gen: Long) {
+        cancelIdleFade()
+        pendingIdleFade = idleScheduler.schedule({
+            if (animGen.get() == gen) {
+                lastScrollPercent = -1
+                worker.execute {
+                    if (animGen.get() == gen) {
+                        turnOffInternal(closeSessionAfter = false)
+                    }
+                }
+            }
+        }, SCROLL_IDLE_FADE_MS, TimeUnit.MILLISECONDS)
+    }
+
+    // ---- Interactive Behaviours -----------------------------------------
 
     /**
-     * Interactive Scroll Progress:
-     * - Phone (2a / 2a+): The circular 24-segment C-ring lights smoothly from top to bottom
-     *   as the user scrolls down, and drains backwards as they scroll up!
-     * - Phone (1): Lights the diagonal D1 bar (8 segments) progressively.
-     * - Phone (2): Lights the center 16-segment C1 arc progressively.
-     * - Phone (3a): Lights the 20-segment C arc progressively.
-     * - Phone (4a / 4b): Lights the A strip progressively.
-     * - Matrix: Sweeps an LED progress bar across the matrix.
+     * Live document scroll mirror:
+     * Lights top-to-bottom as user scrolls down (and drains bottom-to-top when scrolling up),
+     * deduplicated per percent so scrolling stays locked at 120 FPS, with clean fade-out after rest.
      */
     fun onScrollProgress(percent: Int) {
         if (!available || !enabled) return
         val p = percent.coerceIn(0, 100)
-
-        if (hardware == Hardware.INTERFACE) {
-            val frame = IntArray(totalChannels)
-            when (modelGroup) {
-                ModelGroup.PHONE_2A_3A -> {
-                    // For Phone 2a/2a+, channels 0..23 are the 24 circular segments around camera
-                    val segCount = if (totalChannels == 36) 20 else 24
-                    val startOffset = if (totalChannels == 36) 16 else 0
-                    val litCount = (p * segCount / 100).coerceIn(0, segCount)
-                    for (i in 0 until litCount) {
-                        frame[startOffset + i] = MAX_LIGHT
-                    }
-                }
-                ModelGroup.PHONE_1_2 -> {
-                    if (totalChannels == 33) {
-                        // Phone (2): C1_1..C1_16 are channels 3..18
-                        val litCount = (p * 16 / 100).coerceIn(0, 16)
-                        for (i in 0 until litCount) frame[3 + i] = MAX_LIGHT
-                    } else {
-                        // Phone (1): D1_1..D1_8 are channels 7..14
-                        val litCount = (p * 8 / 100).coerceIn(0, 8)
-                        for (i in 0 until litCount) frame[7 + i] = MAX_LIGHT
-                    }
-                }
-                ModelGroup.PHONE_4A_4B -> {
-                    val count = totalChannels
-                    val litCount = (p * count / 100).coerceIn(0, count)
-                    for (i in 0 until litCount) frame[i] = MAX_LIGHT
-                }
-                else -> {
-                    val litCount = (p * totalChannels / 100).coerceIn(0, totalChannels)
-                    for (i in 0 until litCount) frame[i] = MAX_LIGHT
-                }
+        if (p == lastScrollPercent) return
+        lastScrollPercent = p
+        val gen = animGen.incrementAndGet()
+        val frame = GlyphPatterns.scrollFrame(model, p)
+        worker.execute {
+            if (animGen.get() == gen) {
+                sendFrame(frame)
             }
-            session { glyphManager?.setFrameColors(frame) }
-        } else if (hardware == Hardware.MATRIX) {
-            matrixSweep(p)
+        }
+        scheduleIdleFade(gen)
+    }
+
+    /** Subtle autosave tick while typing — never freezes UI and never wipes active glyphs harshly. */
+    fun onAutoSavePulse() {
+        if (!available || !enabled) return
+        val gen = animGen.incrementAndGet()
+        cancelIdleFade()
+        val pulse = GlyphPatterns.saveFrame(model, 25)
+        val blank = IntArray(model.channelCount)
+        worker.execute {
+            if (animGen.get() != gen) return@execute
+            sendFrame(pulse)
+            sleepUninterruptibly(70)
+            if (animGen.get() != gen) return@execute
+            sendFrame(blank)
         }
     }
 
-    /**
-     * Saving note: Lights fill up from 0 to 100% (meter effect).
-     */
+    /** Export / explicit Save progress: rising meter from BOTTOM to TOP. */
     fun onSaveProgress(percent: Int) {
-        onScrollProgress(percent)
+        if (!available || !enabled) return
+        lastScrollPercent = -1
+        cancelIdleFade()
+        val gen = animGen.incrementAndGet()
+        val frame = GlyphPatterns.saveFrame(model, percent)
+        worker.execute {
+            if (animGen.get() == gen) sendFrame(frame)
+        }
     }
 
-    /**
-     * Save completed: All glyphs pulse / celebrate with a full bright flash, then fade off.
-     */
+    /** Explicit Save / Export completed: rising bottom-to-top sweep + confirmation flash. */
     fun onSaveDone() {
         if (!available || !enabled) return
-        if (hardware == Hardware.INTERFACE) {
-            val full = IntArray(totalChannels) { MAX_LIGHT }
-            val blank = IntArray(totalChannels) { OFF }
-            session {
-                glyphManager?.setFrameColors(full)
-                Thread.sleep(120)
-                glyphManager?.setFrameColors(blank)
-                Thread.sleep(80)
-                glyphManager?.setFrameColors(full)
-                Thread.sleep(180)
-                glyphManager?.setFrameColors(blank)
+        lastScrollPercent = -1
+        cancelIdleFade()
+        val gen = animGen.incrementAndGet()
+        val m = model
+        val blank = IntArray(m.channelCount)
+        worker.execute {
+            for (step in intArrayOf(25, 55, 85, 100)) {
+                if (animGen.get() != gen) return@execute
+                sendFrame(GlyphPatterns.saveFrame(m, step))
+                sleepUninterruptibly(45)
             }
-        } else if (hardware == Hardware.MATRIX) {
-            showMatrixText("SAVED")
+            if (animGen.get() != gen) return@execute
+            sendFrame(GlyphPatterns.doneFlashFrame(m, isShare = false))
+            sleepUninterruptibly(220)
+            if (animGen.get() != gen) return@execute
+            sendFrame(blank)
         }
     }
 
-    /**
-     * Sharing / Exporting (Upload): Lights drain in the OPPOSITE direction (top to bottom drain).
-     * As upload advances 0% to 100%, the active lights decrease from full down to 0.
-     */
+    /** Share / Upload progress: draining meter from TOP to BOTTOM (opposite of Save). */
     fun onShareProgress(percent: Int) {
         if (!available || !enabled) return
-        val p = percent.coerceIn(0, 100)
-        val inverted = 100 - p
-
-        if (hardware == Hardware.INTERFACE) {
-            val frame = IntArray(totalChannels)
-            when (modelGroup) {
-                ModelGroup.PHONE_2A_3A -> {
-                    val segCount = if (totalChannels == 36) 20 else 24
-                    val startOffset = if (totalChannels == 36) 16 else 0
-                    val litCount = (inverted * segCount / 100).coerceIn(0, segCount)
-                    for (i in 0 until litCount) frame[startOffset + (segCount - 1 - i)] = MAX_LIGHT
-                }
-                ModelGroup.PHONE_1_2 -> {
-                    if (totalChannels == 33) {
-                        val litCount = (inverted * 16 / 100).coerceIn(0, 16)
-                        for (i in 0 until litCount) frame[3 + (15 - i)] = MAX_LIGHT
-                    } else {
-                        val litCount = (inverted * 8 / 100).coerceIn(0, 8)
-                        for (i in 0 until litCount) frame[7 + (7 - i)] = MAX_LIGHT
-                    }
-                }
-                else -> {
-                    val litCount = (inverted * totalChannels / 100).coerceIn(0, totalChannels)
-                    for (i in 0 until litCount) frame[totalChannels - 1 - i] = MAX_LIGHT
-                }
-            }
-            session { glyphManager?.setFrameColors(frame) }
-        } else if (hardware == Hardware.MATRIX) {
-            matrixSweep(inverted)
+        lastScrollPercent = -1
+        cancelIdleFade()
+        val gen = animGen.incrementAndGet()
+        val frame = GlyphPatterns.shareDrainFrame(model, percent)
+        worker.execute {
+            if (animGen.get() == gen) sendFrame(frame)
         }
     }
 
+    /** Share completed: top-to-bottom drain sweep + crisp upward send flash. */
     fun onShareDone() {
         if (!available || !enabled) return
-        if (hardware == Hardware.INTERFACE) {
-            val full = IntArray(totalChannels) { MAX_LIGHT }
-            val blank = IntArray(totalChannels) { OFF }
-            session {
-                glyphManager?.setFrameColors(full)
-                Thread.sleep(100)
-                glyphManager?.setFrameColors(blank)
+        lastScrollPercent = -1
+        cancelIdleFade()
+        val gen = animGen.incrementAndGet()
+        val m = model
+        val blank = IntArray(m.channelCount)
+        worker.execute {
+            for (step in intArrayOf(65, 85, 100)) {
+                if (animGen.get() != gen) return@execute
+                sendFrame(GlyphPatterns.shareDrainFrame(m, step))
+                sleepUninterruptibly(45)
             }
-        } else if (hardware == Hardware.MATRIX) {
-            showMatrixText("SHARED")
+            if (animGen.get() != gen) return@execute
+            sendFrame(GlyphPatterns.doneFlashFrame(m, isShare = true))
+            sleepUninterruptibly(200)
+            if (animGen.get() != gen) return@execute
+            sendFrame(blank)
         }
     }
 
-    /**
-     * Delete / Trash interaction: A sharp, crisp double-blink on the main glyphs!
-     */
+    /** Delete / Trash interaction: crisp double-blink synchronized with vibration. */
     fun onDelete() {
         if (!available || !enabled) return
-        if (hardware == Hardware.INTERFACE) {
-            val frame = IntArray(totalChannels)
-            // On Phone 2a, light B (camera ring: 24) and A (slash: 25)
-            if (modelGroup == ModelGroup.PHONE_2A_3A && totalChannels == 26) {
-                frame[24] = MAX_LIGHT
-                frame[25] = MAX_LIGHT
-            } else {
-                for (i in 0 until totalChannels) frame[i] = MAX_LIGHT
+        lastScrollPercent = -1
+        cancelIdleFade()
+        val gen = animGen.incrementAndGet()
+        val m = model
+        val flash = GlyphPatterns.deleteBlinkFrame(m)
+        val blank = IntArray(m.channelCount)
+        worker.execute {
+            repeat(2) {
+                if (animGen.get() != gen) return@execute
+                sendFrame(flash)
+                sleepUninterruptibly(90)
+                if (animGen.get() != gen) return@execute
+                sendFrame(blank)
+                sleepUninterruptibly(70)
             }
-            val blank = IntArray(totalChannels) { OFF }
-            session {
-                glyphManager?.setFrameColors(frame)
-                Thread.sleep(80)
-                glyphManager?.setFrameColors(blank)
-                Thread.sleep(60)
-                glyphManager?.setFrameColors(frame)
-                Thread.sleep(100)
-                glyphManager?.setFrameColors(blank)
-            }
-        } else if (hardware == Hardware.MATRIX) {
-            matrixBlink(2)
         }
     }
 
-    /**
-     * Back button interaction: A subtle, rapid tap pulse on the upper glyph.
-     */
+    /** Back navigation: rapid crisp tap pulse on upper glyph / left arrow on Matrix. */
     fun onBack() {
         if (!available || !enabled) return
-        if (hardware == Hardware.INTERFACE) {
-            val frame = IntArray(totalChannels)
-            if (modelGroup == ModelGroup.PHONE_2A_3A && totalChannels == 26) {
-                frame[25] = MED_LIGHT // Channel A (diagonal slash)
-            } else {
-                frame[0] = MED_LIGHT
-            }
-            val blank = IntArray(totalChannels) { OFF }
-            session {
-                glyphManager?.setFrameColors(frame)
-                Thread.sleep(60)
-                glyphManager?.setFrameColors(blank)
-            }
+        lastScrollPercent = -1
+        cancelIdleFade()
+        val gen = animGen.incrementAndGet()
+        val m = model
+        val pulse = GlyphPatterns.backPulseFrame(m)
+        val blank = IntArray(m.channelCount)
+        worker.execute {
+            if (animGen.get() != gen) return@execute
+            sendFrame(pulse)
+            sleepUninterruptibly(90)
+            if (animGen.get() != gen) return@execute
+            sendFrame(blank)
         }
     }
 
-    /**
-     * New note creation: A gentle welcome glow on the glyphs.
-     */
+    /** New / Open note: gentle welcoming glow on the model's signature glyph. */
     fun onNew() {
         if (!available || !enabled) return
-        if (hardware == Hardware.INTERFACE) {
-            val frame = IntArray(totalChannels)
-            if (modelGroup == ModelGroup.PHONE_2A_3A && totalChannels == 26) {
-                frame[24] = MED_LIGHT // Channel B (ring)
-            } else {
-                for (i in 0 until totalChannels) frame[i] = LOW_LIGHT
-            }
-            val blank = IntArray(totalChannels) { OFF }
-            session {
-                glyphManager?.setFrameColors(frame)
-                Thread.sleep(120)
-                glyphManager?.setFrameColors(blank)
-            }
-        } else if (hardware == Hardware.MATRIX) {
-            showMatrixText("NEW")
+        lastScrollPercent = -1
+        cancelIdleFade()
+        val gen = animGen.incrementAndGet()
+        val m = model
+        val pulse = GlyphPatterns.newNotePulseFrame(m)
+        val blank = IntArray(m.channelCount)
+        worker.execute {
+            if (animGen.get() != gen) return@execute
+            sendFrame(pulse)
+            sleepUninterruptibly(150)
+            if (animGen.get() != gen) return@execute
+            sendFrame(blank)
         }
     }
 
-    /** Generic blink helper for backward compatibility */
-    fun blink(colour: Int = MAX_LIGHT, times: Int = 2) {
-        onDelete()
-    }
-
-    // ---- Glyph MATRIX: pixel frames ------------------------------------
-
-    fun showMatrixText(text: String) {
-        if (!available || !enabled || hardware != Hardware.MATRIX) return
-        runCatching {
-            val bmp = GlyphMatrixUtils.createBitmapWithText(text, 18f, 0xFFFFFFFF.toInt())
-            if (bmp == null) return@runCatching
-            val width = Common.getDeviceMatrixLength()
-            if (width <= 0) return@runCatching
-            val frame = GlyphMatrixUtils.convertToGlyphMatrix(bmp, width, 0, 0, 0, 0, false, false)
-            matrixManager?.setMatrixFrame(frame)
-        }.onFailure { Log.w(TAG, "matrix text: ${it.message}") }
-    }
-
-    fun matrixSweep(percent: Int) {
-        if (!available || !enabled || hardware != Hardware.MATRIX) return
-        runCatching {
-            val width = Common.getDeviceMatrixLength()
-            if (width <= 0) return@runCatching
-            val p = percent.coerceIn(0, 100)
-            val lit = (p * width / 100).coerceIn(0, width)
-            val frame = IntArray(width) { if (it < lit) MAX_LIGHT else OFF }
-            matrixManager?.setMatrixFrame(frame)
+    /** Test pulse when toggling Glyph lights ON in settings: immediate confirmation wave. */
+    fun onTestPulse() {
+        if (!available || !enabled) return
+        lastScrollPercent = -1
+        cancelIdleFade()
+        val gen = animGen.incrementAndGet()
+        val m = model
+        val blank = IntArray(m.channelCount)
+        worker.execute {
+            for (step in intArrayOf(35, 70, 100)) {
+                if (animGen.get() != gen) return@execute
+                sendFrame(GlyphPatterns.scrollFrame(m, step))
+                sleepUninterruptibly(55)
+            }
+            if (animGen.get() != gen) return@execute
+            sendFrame(GlyphPatterns.doneFlashFrame(m, isShare = false))
+            sleepUninterruptibly(140)
+            if (animGen.get() != gen) return@execute
+            sendFrame(blank)
         }
     }
 
-    fun onMatrixScroll(percent: Int) = matrixSweep(percent)
+    fun blink() = onDelete()
 
-    fun matrixBlink(times: Int = 2) {
-        if (!available || !enabled || hardware != Hardware.MATRIX) return
-        runCatching {
-            val width = Common.getDeviceMatrixLength()
-            if (width <= 0) return@runCatching
-            val on = IntArray(width) { MAX_LIGHT }
-            val off = IntArray(width) { OFF }
-            repeat(times) {
-                matrixManager?.setMatrixFrame(on)
-                Thread.sleep(80)
-                matrixManager?.setMatrixFrame(off)
-                Thread.sleep(60)
-            }
+    private fun sleepUninterruptibly(ms: Long) {
+        try {
+            Thread.sleep(ms)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
         }
     }
 
