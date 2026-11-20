@@ -48,7 +48,6 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
     val messages = messageChannel.receiveAsFlow()
     private val saveRequests = MutableStateFlow<Draft?>(null)
     private var generation = 0L
-    private var savedRope: Rope? = null
     private var initialized = false
     private var saveFailureReported = false
     var selection = Selection()
@@ -102,7 +101,6 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
                         runCatching { repository.openNote(id) }.getOrNull()
                     }
                     if (note != null) {
-                        savedRope = note.root
                         _ui.update { it.copy(root = note.root, title = note.title, noteId = note.noteId,
                             screen = Screen.EDITOR, revision = it.revision + 1, patch = null)
                         }
@@ -241,7 +239,6 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
         GlyphSupport.onNew()
         flushPendingSave()
         val id = repository.nextId()
-        savedRope = Rope.Empty
         selection = Selection()
         history.clear()
         _ui.value = _ui.value.copy(root = Rope.Empty, title = "Untitled", noteId = id,
@@ -260,7 +257,6 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
         viewModelScope.launch {
             try {
                 val draft = repository.openNote(id)
-                savedRope = draft.root
                 selection = draft.selection.bounded(draft.root.length)
                 history.clear()
                 val isManual = draft.root.isNotEmpty() && draft.title != autoTitle(draft.root)
@@ -301,9 +297,14 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
                 dev.pocket.notepad.ui.vibrateDelete(getApplication())
                 GlyphSupport.onDelete()
                 if (_ui.value.noteId == id) {
-                    // The editor was showing this note; leave it to the library.
-                    savedRope = null
-                    _ui.update { it.copy(screen = Screen.LIBRARY) }
+                    // The editor was showing this note; exit cleanly to the library
+                    // so no stale root/selection/history or pending save lingers.
+                    saveRequests.value = null
+                    history.clear()
+                    selection = Selection()
+                    _ui.update { it.copy(screen = Screen.LIBRARY, noteId = "", root = Rope.Empty,
+                        title = "Untitled", titleIsManual = false, patch = null,
+                        revision = it.revision + 1, canUndo = false, canRedo = false) }
                 }
                 refreshNotes()
                 refreshTrash()
@@ -435,8 +436,6 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
         viewModelScope.launch {
             try {
                 val draft = repository.importAsNote(uri)
-                val id = repository.nextId()
-                savedRope = draft.root
                 selection = draft.selection.bounded(draft.root.length)
                 history.clear()
                 val title = if (_ui.value.autoName) {
@@ -446,7 +445,7 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
                 _ui.value = _ui.value.copy(
                     root = draft.root,
                     title = title,
-                    noteId = id,
+                    noteId = draft.noteId,
                     titleIsManual = !_ui.value.autoName,
                     revision = _ui.value.revision + 1,
                     patch = null,
@@ -559,7 +558,6 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
                     val actualName = exporter.publish(pending, uri)
                     val state = _ui.value
                     if (!pending.spec.isPdf && pending.session == session && pending.sourceRevision == state.revision) {
-                        savedRope = state.root
                         if (state.autoName) applySuggestedTitle(pending.spec.fileName)
                         requestSave()
                     }
@@ -650,7 +648,6 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
         try {
             if (!quiet) GlyphSupport.onSaveProgress(20)
             repository.saveNote(draft)
-            savedRope = draft.root
             saveFailureReported = false
             if (!quiet) GlyphSupport.onSaveDone()
         } catch (failure: Exception) {

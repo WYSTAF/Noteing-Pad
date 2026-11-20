@@ -13,6 +13,7 @@ class FrameHealth {
     @Volatile var fps = 0; private set          // avg rate over the last window
     @Volatile var longFrames = 0; private set   // dropped-frame count, same window
     private var armed = false
+    private var posted = false
     private var lastNanos = 0L
     private var nominalStepNanos = 16_666_666L   // best guess; adapts on first frames
     private val stamps = LongArray(64)
@@ -20,7 +21,7 @@ class FrameHealth {
 
     private val frameCallback = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
-            if (!armed) return
+            if (!armed) { posted = false; return }
             val previous = lastNanos
             lastNanos = frameTimeNanos
             if (previous != 0L) {
@@ -69,7 +70,15 @@ class FrameHealth {
             lastNanos = 0L
             stampCount = 0
             longFrames = 0
-            Choreographer.getInstance().postFrameCallback(frameCallback)
+            // Guard against a still-pending callback so a rapid disarm→arm never
+            // spawns two self-reposting chains (double-counted frames).
+            if (!posted) {
+                posted = true
+                Choreographer.getInstance().postFrameCallback(frameCallback)
+            }
+        } else {
+            Choreographer.getInstance().removeFrameCallback(frameCallback)
+            posted = false
         }
     }
 }

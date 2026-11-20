@@ -67,4 +67,52 @@ class MarkdownLogicTest {
         assertEquals(' ', doc[t1.bracketOffset])
         assertEquals('x', doc[t2.bracketOffset])
     }
+
+    @Test
+    fun taskOffsetsStayExactAcrossThousandsOfTasks() {
+        // Regression: lineOffsetAt used to re-sum from line 0 per task (O(n^2)).
+        // The forward-only cursor must still yield exact offsets for every task.
+        val doc = buildString {
+            append("# List\n")
+            repeat(3000) { append("- [ ] Item $it\n") }
+        }
+        val blocks = MarkdownLogic.parseBlocks(doc)
+        val tasks = blocks.filterIsInstance<MarkdownBlock.TaskItem>()
+        assertEquals(3000, tasks.size)
+        tasks.forEachIndexed { index, task ->
+            assertEquals("task $index bracket char", ' ', doc[task.bracketOffset])
+            assertEquals("task $index text", "Item $index", task.text)
+        }
+    }
+
+    @Test
+    fun alignmentTogglesOffWhenReapplied() {
+        val wrapped = "<!--align:center-->\nCentered Title\n<!--/align-->"
+        val caret = wrapped.indexOf("Centered") + 5
+        val edit = MarkdownLogic.computeEdit(wrapped, Selection(caret), MarkdownAction.ALIGN_CENTER)
+        assertEquals(0, edit.replaceStart)
+        assertEquals(wrapped.length, edit.replaceEnd)
+        assertEquals("Centered Title", edit.replacement)
+        val blocks = MarkdownLogic.parseBlocks(edit.replacement)
+        assertEquals(TextAlignMode.LEFT, (blocks[0] as MarkdownBlock.Paragraph).align)
+    }
+
+    @Test
+    fun alignmentSwitchesModeInPlaceWithoutNesting() {
+        val wrapped = "<!--align:center-->\nCentered Title\n<!--/align-->"
+        val caret = wrapped.indexOf("Centered") + 5
+        val edit = MarkdownLogic.computeEdit(wrapped, Selection(caret), MarkdownAction.ALIGN_RIGHT)
+        assertEquals("<!--align:right-->\nCentered Title\n<!--/align-->", edit.replacement)
+        val blocks = MarkdownLogic.parseBlocks(edit.replacement)
+        assertEquals(1, blocks.size)
+        assertEquals(TextAlignMode.RIGHT, (blocks[0] as MarkdownBlock.Paragraph).align)
+    }
+
+    @Test
+    fun alignLeftClearsExistingAlignment() {
+        val wrapped = "<!--align:center-->\nCentered Title\n<!--/align-->"
+        val caret = wrapped.indexOf("Centered") + 5
+        val edit = MarkdownLogic.computeEdit(wrapped, Selection(caret), MarkdownAction.ALIGN_LEFT)
+        assertEquals("Centered Title", edit.replacement)
+    }
 }

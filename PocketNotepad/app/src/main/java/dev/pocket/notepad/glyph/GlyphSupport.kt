@@ -42,8 +42,8 @@ object GlyphSupport {
     private var appContext: Context? = null
     private var glyphManager: GlyphManager? = null
     private var matrixManager: GlyphMatrixManager? = null
-    private var serviceBound = false
-    private var sessionOpen = false
+    @Volatile private var serviceBound = false
+    @Volatile private var sessionOpen = false
 
     private val worker = Executors.newSingleThreadExecutor { r ->
         Thread(r, "GlyphWorker").apply { isDaemon = true }

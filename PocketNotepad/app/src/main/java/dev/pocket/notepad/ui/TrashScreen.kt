@@ -61,7 +61,7 @@ fun TrashScreen(
             }
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
-                items(items, key = { it.id }) { note ->
+                items(items, key = { "${it.id}_${it.deletedAt}" }) { note ->
                     val remaining = ceil((note.deletedAt + Limits.TRASH_RETENTION_DAYS * dayMs - now) / dayMs.toDouble())
                         .toInt().coerceAtLeast(0)
                     Row(Modifier.fillMaxWidth().clickable { onRestore(note.id) }

@@ -194,7 +194,11 @@ class NotepadRepository(context: Context) {
 
     private fun trashFileFor(id: String): File? {
         require(id.matches(ID_PATTERN)) { "Invalid note id." }
-        return trashDirectory.listFiles()?.firstOrNull { it.name.endsWith("_$id.bin") }
+        // An id can have more than one trash entry (delete → restore → delete);
+        // restore the most recent deletion, not an arbitrary listFiles() order.
+        return trashDirectory.listFiles()
+            ?.filter { it.name.endsWith("_$id.bin") }
+            ?.maxByOrNull { TRASH_NAME.matchEntire(it.name)?.groupValues?.get(1)?.toLongOrNull() ?: 0L }
     }
 
     /** SAF open stays available; the picked file's content becomes a new note. */

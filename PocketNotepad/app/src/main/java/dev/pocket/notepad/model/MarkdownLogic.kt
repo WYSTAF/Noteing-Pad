@@ -215,24 +215,54 @@ object MarkdownLogic {
     private fun wrapAlignment(doc: CharSequence, selStart: Int, selEnd: Int, align: String): MarkdownEdit {
         val startTag = "<!--align:$align-->"
         val endTag = "<!--/align-->"
-        if (selStart == selEnd) {
-            val (lineStart, lineEnd) = lineBounds(doc, selStart, selEnd)
-            val line = doc.subSequence(lineStart, lineEnd).toString()
-            return if (line.isBlank()) {
-                val rep = "$startTag\n\n$endTag"
-                val caret = selStart + startTag.length + 1
-                MarkdownEdit(selStart, selEnd, rep, Selection(caret))
-            } else {
-                val rep = "$startTag\n$line\n$endTag"
-                val innerStart = lineStart + startTag.length + 1
-                MarkdownEdit(lineStart, lineEnd, rep, Selection(innerStart, innerStart + line.length))
-            }
-        }
         val (lineStart, lineEnd) = lineBounds(doc, selStart, selEnd)
         val inner = doc.subSequence(lineStart, lineEnd).toString()
+        val collapsed = selStart == selEnd
+
+        // If the block is already directly enclosed by an align pair, toggle or
+        // retarget it in place rather than nesting a second pair (nesting made the
+        // parser drop back to LEFT at the first end tag and accumulate junk tags).
+        val enclosing = enclosingAlignPair(doc, lineStart, lineEnd)
+        if (enclosing != null) {
+            val (pairStart, pairEnd, existingMode) = enclosing
+            val caretWithin = (selStart - lineStart).coerceIn(0, inner.length)
+            return if (align == "left" || existingMode == align) {
+                val caret = pairStart + caretWithin
+                MarkdownEdit(pairStart, pairEnd, inner,
+                    if (collapsed) Selection(caret) else Selection(pairStart, pairStart + inner.length))
+            } else {
+                val rep = "$startTag\n$inner\n$endTag"
+                val innerStart = pairStart + startTag.length + 1
+                MarkdownEdit(pairStart, pairEnd, rep,
+                    if (collapsed) Selection(innerStart + caretWithin)
+                    else Selection(innerStart, innerStart + inner.length))
+            }
+        }
+
+        if (collapsed && inner.isBlank()) {
+            val rep = "$startTag\n\n$endTag"
+            val caret = selStart + startTag.length + 1
+            return MarkdownEdit(selStart, selEnd, rep, Selection(caret))
+        }
         val rep = "$startTag\n$inner\n$endTag"
         val innerStart = lineStart + startTag.length + 1
         return MarkdownEdit(lineStart, lineEnd, rep, Selection(innerStart, innerStart + inner.length))
+    }
+
+    /** Detects an align start tag on the line above and end tag on the line below
+     *  the block [lineStart, lineEnd). Returns (pairStart, pairEnd, mode) or null. */
+    private fun enclosingAlignPair(doc: CharSequence, lineStart: Int, lineEnd: Int): Triple<Int, Int, String>? {
+        if (lineStart <= 0 || doc[lineStart - 1] != '\n') return null
+        var prevStart = lineStart - 1
+        while (prevStart > 0 && doc[prevStart - 1] != '\n') prevStart--
+        val startMatch = ALIGN_START.matchEntire(doc.subSequence(prevStart, lineStart - 1).toString().trim())
+            ?: return null
+        if (lineEnd >= doc.length || doc[lineEnd] != '\n') return null
+        val nextStart = lineEnd + 1
+        var nextEnd = nextStart
+        while (nextEnd < doc.length && doc[nextEnd] != '\n') nextEnd++
+        if (!ALIGN_END.matches(doc.subSequence(nextStart, nextEnd).toString().trim())) return null
+        return Triple(prevStart, nextEnd, startMatch.groupValues[1].lowercase())
     }
 
     // ---- Markdown Block Parser (for Live Preview & PDF Alignment) ----------
@@ -250,12 +280,17 @@ object MarkdownLogic {
         val lines = source.split('\n')
         var align = TextAlignMode.LEFT
         var i = 0
-        var offset = 0
 
+        // Task lines are visited in increasing order, so a forward-only cursor
+        // amortizes to O(n) overall instead of re-summing from line 0 per task.
+        var scanLine = 0
+        var scanOffset = 0
         fun lineOffsetAt(idx: Int): Int {
-            var pos = 0
-            for (k in 0 until idx) pos += lines[k].length + 1
-            return pos
+            while (scanLine < idx) {
+                scanOffset += lines[scanLine].length + 1
+                scanLine++
+            }
+            return scanOffset
         }
 
         while (i < lines.size) {
@@ -382,7 +417,6 @@ object MarkdownLogic {
             if (paraLines.isNotEmpty()) {
                 blocks += MarkdownBlock.Paragraph(paraLines.joinToString(" "), align)
             }
-            offset++
         }
         return blocks
     }

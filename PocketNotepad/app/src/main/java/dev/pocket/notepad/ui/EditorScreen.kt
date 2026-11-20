@@ -148,8 +148,12 @@ fun EditorScreen(model: NotepadViewModel) {
                         }
                     }
                     if (markdownPreview) {
+                        // Materialize the body only when the rope actually changes;
+                        // unrelated recompositions (scroll stats, snackbars) must not
+                        // re-copy a multi-megabyte document on the main thread.
+                        val previewSource = remember(state.root) { state.root.toString() }
                         MarkdownPreview(
-                            source = state.root.toString(),
+                            source = previewSource,
                             onToggleTask = model::toggleMarkdownTask,
                             modifier = Modifier.fillMaxWidth().weight(1f)
                         )
