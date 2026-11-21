@@ -165,4 +165,24 @@ class GlyphPatternsTest {
             assertTrue("${model.displayName} stream must move", heads.size >= 2)
         }
     }
+
+    @Test
+    fun fallOrderIsACompletePermutationForEveryLinearModel() {
+        // The full-body cascade must touch every LED exactly once, so meters and
+        // comets sweep the whole phone instead of a single strip.
+        for (model in NothingModel.entries) {
+            if (model == NothingModel.UNKNOWN || model.isMatrix) continue
+            val order = GlyphPatterns.topToBottomIndices(model)
+            assertEquals(model.displayName, model.channelCount, order.size)
+            assertEquals(model.displayName, (0 until model.channelCount).toList(), order.toList().sorted())
+            assertTrue("${model.displayName} left snap empty", GlyphPatterns.leftIndices(model).isNotEmpty())
+            assertTrue("${model.displayName} right snap empty", GlyphPatterns.rightIndices(model).isNotEmpty())
+            // Left/right are spatial partitions: no channel belongs to both.
+            val left = GlyphPatterns.leftIndices(model).toSet()
+            val right = GlyphPatterns.rightIndices(model).toSet()
+            assertTrue("${model.displayName} left/right overlap", (left intersect right).isEmpty())
+            assertTrue("${model.displayName} out-of-range channel",
+                (left + right).all { it in 0 until model.channelCount })
+        }
+    }
 }

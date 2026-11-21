@@ -113,21 +113,51 @@ object GlyphPatterns {
 
     /**
      * Ordered indices from TOP to BOTTOM for each Glyph Interface model,
-     * verified directly against glyph-sdk-2.0.aar channel constants.
+     * verified against the official Glyph Developer Kit channel map
+     * (Nothing-Developer-Programme/Glyph-Developer-Kit README, 2026):
+     *
+     * Phone (1): A1/B1 top corners, C1-C4 coil ring, D1_8..D1_1 bottom strip
+     *            (docs: D1_1 is the bottom, D1_8 the top), E1 bottom dot.
+     * Phone (2): A1/A2 camera-left arcs, B1 top-right slash, C1_16..C1_1 big
+     *            arc top-left to bottom-right, C2..C6 surround arcs, D1_8..D1_1
+     *            bottom strip, E1 bottom dot.
+     * Phone (2a): B right bar, C_24..C_1 eye ring top-right to bottom-left,
+     *             A mid-left arc last.
+     * Phone (3a): B_5..B_1 top-right slash, C_20..C_1 eye ring top-right to
+     *             bottom-left, A_1..A_11 right strip top to bottom.
+     * Phone (4a)/(4b): single strip, A_1 top to A_6/A_4 bottom.
+     *
+     * Each list is a permutation of every channel (0 until channelCount), so a
+     * meter or comet sweeps the whole phone body, not just one strip.
      */
     fun topToBottomIndices(model: NothingModel): IntArray = when (model) {
-        // Phone (1): D1_8 (14, top) -> D1_1 (7, bottom)
-        NothingModel.PHONE_1 -> intArrayOf(14, 13, 12, 11, 10, 9, 8, 7)
-        // Phone (2): C1_16 (18, top-left) -> C1_1 (3, bottom-right)
-        NothingModel.PHONE_2 -> (18 downTo 3).toList().toIntArray()
-        // Phone (2a / 2a+): C_24 (23, top-right) -> C_1 (0, bottom-left)
-        NothingModel.PHONE_2A, NothingModel.PHONE_2A_PLUS -> (23 downTo 0).toList().toIntArray()
-        // Phone (3a / 3a Pro): C_20 (19, top-right) -> C_1 (0, bottom-left)
-        NothingModel.PHONE_3A -> (19 downTo 0).toList().toIntArray()
-        // Phone (4a): A_1 (0, top) -> A_6 (5, bottom)
-        NothingModel.PHONE_4A -> intArrayOf(0, 1, 2, 3, 4, 5)
-        // Phone (4b): A_1 (0, top) -> A_4 (3, bottom)
-        NothingModel.PHONE_4B -> intArrayOf(0, 1, 2, 3)
+        NothingModel.PHONE_1 -> intArrayOf(
+            0, 1, 2, 3, 4, 5,                       // A1, B1, C ring
+            14, 13, 12, 11, 10, 9, 8, 7,            // D1_8 -> D1_1 (top -> bottom)
+            6                                       // E1 bottom dot
+        )
+        NothingModel.PHONE_2 -> intArrayOf(
+            0, 1, 2,                                // A1, A2, B1
+            18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, // C1_16 -> C1_1
+            19, 20, 23,                             // C2, C3, C6 surround arcs
+            21, 22,                                 // C4, C5 bottom arcs
+            32, 31, 30, 29, 28, 27, 26, 25,         // D1_8 -> D1_1
+            24                                      // E1
+        )
+        NothingModel.PHONE_2A, NothingModel.PHONE_2A_PLUS -> intArrayOf(
+            24,                                     // B right bar
+            23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12,
+            11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,   // C_24 -> C_1 top-right -> bottom-left
+            25                                      // A mid-left arc
+        )
+        NothingModel.PHONE_3A -> intArrayOf(
+            35, 34, 33, 32, 31,                     // B_5 -> B_1 top-right slash
+            19, 18, 17, 16, 15, 14, 13, 12, 11, 10,
+            9, 8, 7, 6, 5, 4, 3, 2, 1, 0,           // C_20 -> C_1
+            20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 // A_1 -> A_11 right strip
+        )
+        NothingModel.PHONE_4A -> intArrayOf(0, 1, 2, 3, 4, 5)       // A_1 top -> A_6 bottom
+        NothingModel.PHONE_4B -> intArrayOf(0, 1, 2, 3)             // A_1 top -> A_4 bottom
         else -> IntArray(0)
     }
 
@@ -278,23 +308,36 @@ object GlyphPatterns {
 
     enum class SnapSide { LEFT, RIGHT }
 
-    /** Left-half channels — "enter note" snap and undo tick base. */
+    /**
+     * Spatially-left elements — "enter note" snap and undo tick base.
+     * Mapped from the official GDK layout diagrams: on Phone (1) the left side
+     * is A1 plus the left half of the C ring; on Phone (2) it is the camera-left
+     * arcs (A1/A2) plus the left/bottom-left surround arcs (C2/C3/C4); on (2a)
+     * it is the A arc plus the lower-left half of the C ring; on (3a) it is the
+     * left half of the C ring. The single-strip (4a)/(4b) glyphs have no left/
+     * right elements, so the top half stands in for left.
+     */
     fun leftIndices(model: NothingModel): IntArray = when (model) {
-        NothingModel.PHONE_1 -> intArrayOf(7, 8, 9, 10)
-        NothingModel.PHONE_2 -> (0..7).toList().toIntArray()
-        NothingModel.PHONE_2A, NothingModel.PHONE_2A_PLUS -> (0..11).toList().toIntArray()
+        NothingModel.PHONE_1 -> intArrayOf(0, 2, 3)
+        NothingModel.PHONE_2 -> intArrayOf(0, 1, 19, 20, 21)
+        NothingModel.PHONE_2A, NothingModel.PHONE_2A_PLUS ->
+            (0..11).toList().toIntArray() + intArrayOf(25)
         NothingModel.PHONE_3A -> (0..9).toList().toIntArray()
         NothingModel.PHONE_4A -> intArrayOf(0, 1, 2)
         NothingModel.PHONE_4B -> intArrayOf(0, 1)
         else -> IntArray(0)
     }
 
-    /** Right-half channels — "back" snap and redo tick base. */
+    /** Spatially-right elements — "back" snap and redo tick base. */
     fun rightIndices(model: NothingModel): IntArray = when (model) {
-        NothingModel.PHONE_1 -> intArrayOf(11, 12, 13, 14)
-        NothingModel.PHONE_2 -> (25..32).toList().toIntArray()
-        NothingModel.PHONE_2A, NothingModel.PHONE_2A_PLUS -> (12..23).toList().toIntArray()
-        NothingModel.PHONE_3A -> (10..19).toList().toIntArray()
+        NothingModel.PHONE_1 -> intArrayOf(1, 4, 5, 6) + (7..14).toList().toIntArray()
+        NothingModel.PHONE_2 ->
+            intArrayOf(2) + (3..18).toList().toIntArray() +
+                intArrayOf(22, 23, 24) + (25..32).toList().toIntArray()
+        NothingModel.PHONE_2A, NothingModel.PHONE_2A_PLUS ->
+            (12..23).toList().toIntArray() + intArrayOf(24)
+        NothingModel.PHONE_3A ->
+            (10..19).toList().toIntArray() + (20..35).toList().toIntArray()
         NothingModel.PHONE_4A -> intArrayOf(3, 4, 5)
         NothingModel.PHONE_4B -> intArrayOf(2, 3)
         else -> IntArray(0)
