@@ -84,10 +84,27 @@ object MarkdownLogic {
                 else if (line.startsWith("• ")) "- " + line.removePrefix("• ")
                 else "- $line"
             }
-            MarkdownAction.NUMBERED -> prefixLines(doc, selStart, selEnd) { line, idx ->
-                val numMatch = Regex("^\\d+\\.\\s").find(line)
-                if (numMatch != null) line.substring(numMatch.value.length)
-                else "${idx + 1}. $line"
+            MarkdownAction.NUMBERED -> {
+                // All-or-nothing toggle: if every line is numbered, strip the
+                // numbers; otherwise renumber the whole block sequentially so a
+                // partially-numbered selection can't produce "1. 1. 2." duplicates.
+                val (lineStart, lineEnd) = lineBounds(doc, selStart, selEnd)
+                val block = doc.subSequence(lineStart, lineEnd).toString()
+                val lines = block.split('\n')
+                val allNumbered = lines.all { NUMBER_LINE.containsMatchIn(it) }
+                val out = if (allNumbered) {
+                    lines.joinToString("\n") { it.replaceFirst(NUMBER_LINE, "") }
+                } else {
+                    lines.mapIndexed { index, line ->
+                        "${index + 1}. " + line.replaceFirst(NUMBER_LINE, "")
+                    }.joinToString("\n")
+                }
+                val nextSel = if (selStart == selEnd) {
+                    val caret = (selEnd + out.length - block.length)
+                        .coerceIn(lineStart, lineStart + out.length)
+                    Selection(caret)
+                } else Selection(lineStart, lineStart + out.length)
+                MarkdownEdit(lineStart, lineEnd, out, nextSel)
             }
             MarkdownAction.CHECKLIST -> prefixLines(doc, selStart, selEnd) { line, _ ->
                 when {
@@ -269,6 +286,7 @@ object MarkdownLogic {
 
     private val ALIGN_START = Regex("^<!--\\s*align:(left|center|right)\\s*-->$", RegexOption.IGNORE_CASE)
     private val ALIGN_END = Regex("^<!--\\s*/align\\s*-->$", RegexOption.IGNORE_CASE)
+    private val NUMBER_LINE = Regex("^\\d+\\.\\s+")
     private val HEADING_RE = Regex("^(#{1,3})\\s+(.*)$")
     private val TASK_RE = Regex("^[-*]\\s+\\[([ xX])\\]\\s+(.*)$")
     private val BULLET_RE = Regex("^(?:[-*]|•)\\s+(.*)$")

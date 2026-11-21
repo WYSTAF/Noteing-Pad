@@ -115,4 +115,15 @@ class MarkdownLogicTest {
         val edit = MarkdownLogic.computeEdit(wrapped, Selection(caret), MarkdownAction.ALIGN_LEFT)
         assertEquals("Centered Title", edit.replacement)
     }
+
+    @Test
+    fun numberedToggleStripsWhenAllNumberedAndRenumbersPartialBlocks() {
+        val allNumbered = "1. one\n2. two"
+        val strip = MarkdownLogic.computeEdit(allNumbered, Selection(0, allNumbered.length), MarkdownAction.NUMBERED)
+        assertEquals("one\ntwo", strip.replacement)
+
+        val partial = "1. one\ntwo"
+        val fix = MarkdownLogic.computeEdit(partial, Selection(0, partial.length), MarkdownAction.NUMBERED)
+        assertEquals("1. one\n2. two", fix.replacement)
+    }
 }
