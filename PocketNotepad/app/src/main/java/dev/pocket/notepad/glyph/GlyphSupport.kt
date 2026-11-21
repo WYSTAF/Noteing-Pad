@@ -373,22 +373,6 @@ object GlyphSupport {
         scheduleIdleFade(gen)
     }
 
-    /** Subtle autosave tick while typing — never freezes UI and never wipes active glyphs harshly. */
-    fun onAutoSavePulse() {
-        if (!available || !enabled) return
-        val gen = animGen.incrementAndGet()
-        cancelIdleFade()
-        val pulse = GlyphPatterns.saveFrame(model, 25)
-        val blank = IntArray(model.channelCount)
-        worker.execute {
-            if (animGen.get() != gen) return@execute
-            sendFrame(pulse)
-            sleepUninterruptibly(70)
-            if (animGen.get() != gen) return@execute
-            sendFrame(blank)
-        }
-    }
-
     /** Export / explicit Save progress: rising meter from BOTTOM to TOP. */
     fun onSaveProgress(percent: Int) {
         if (!available || !enabled) return
@@ -401,7 +385,7 @@ object GlyphSupport {
         }
     }
 
-    /** Explicit Save / Export completed: rising bottom-to-top sweep + confirmation flash. */
+    /** Explicit Save / Export completed: short rising sweep + confirmation flash. */
     fun onSaveDone() {
         if (!available || !enabled) return
         lastScrollPercent = -1
@@ -410,14 +394,14 @@ object GlyphSupport {
         val m = model
         val blank = IntArray(m.channelCount)
         worker.execute {
-            for (step in intArrayOf(25, 55, 85, 100)) {
+            for (step in intArrayOf(40, 75, 100)) {
                 if (animGen.get() != gen) return@execute
                 sendFrame(GlyphPatterns.saveFrame(m, step))
-                sleepUninterruptibly(45)
+                sleepUninterruptibly(25)
             }
             if (animGen.get() != gen) return@execute
             sendFrame(GlyphPatterns.doneFlashFrame(m, isShare = false))
-            sleepUninterruptibly(220)
+            sleepUninterruptibly(110)
             if (animGen.get() != gen) return@execute
             sendFrame(blank)
         }
@@ -435,7 +419,7 @@ object GlyphSupport {
         }
     }
 
-    /** Share completed: top-to-bottom drain sweep + crisp upward send flash. */
+    /** Share completed: quick drain sweep + crisp upward send flash. */
     fun onShareDone() {
         if (!available || !enabled) return
         lastScrollPercent = -1
@@ -444,14 +428,14 @@ object GlyphSupport {
         val m = model
         val blank = IntArray(m.channelCount)
         worker.execute {
-            for (step in intArrayOf(65, 85, 100)) {
+            for (step in intArrayOf(70, 100)) {
                 if (animGen.get() != gen) return@execute
                 sendFrame(GlyphPatterns.shareDrainFrame(m, step))
-                sleepUninterruptibly(45)
+                sleepUninterruptibly(25)
             }
             if (animGen.get() != gen) return@execute
             sendFrame(GlyphPatterns.doneFlashFrame(m, isShare = true))
-            sleepUninterruptibly(200)
+            sleepUninterruptibly(110)
             if (animGen.get() != gen) return@execute
             sendFrame(blank)
         }
@@ -490,7 +474,7 @@ object GlyphSupport {
         worker.execute {
             if (animGen.get() != gen) return@execute
             sendFrame(pulse)
-            sleepUninterruptibly(90)
+            sleepUninterruptibly(70)
             if (animGen.get() != gen) return@execute
             sendFrame(blank)
         }
@@ -508,7 +492,7 @@ object GlyphSupport {
         worker.execute {
             if (animGen.get() != gen) return@execute
             sendFrame(pulse)
-            sleepUninterruptibly(150)
+            sleepUninterruptibly(90)
             if (animGen.get() != gen) return@execute
             sendFrame(blank)
         }
@@ -523,20 +507,18 @@ object GlyphSupport {
         val m = model
         val blank = IntArray(m.channelCount)
         worker.execute {
-            for (step in intArrayOf(35, 70, 100)) {
+            for (step in intArrayOf(50, 100)) {
                 if (animGen.get() != gen) return@execute
                 sendFrame(GlyphPatterns.scrollFrame(m, step))
-                sleepUninterruptibly(55)
+                sleepUninterruptibly(35)
             }
             if (animGen.get() != gen) return@execute
             sendFrame(GlyphPatterns.doneFlashFrame(m, isShare = false))
-            sleepUninterruptibly(140)
+            sleepUninterruptibly(90)
             if (animGen.get() != gen) return@execute
             sendFrame(blank)
         }
     }
-
-    fun blink() = onDelete()
 
     private fun sleepUninterruptibly(ms: Long) {
         try {

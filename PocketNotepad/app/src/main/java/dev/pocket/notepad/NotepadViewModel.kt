@@ -518,7 +518,7 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
             try {
                 GlyphSupport.onSaveProgress(20)
                 // Flush storage before another activity takes focus.
-                persist(makeDraft(), quiet = true)
+                persist(makeDraft())
                 val name = exporter.stage(source.root, spec) { page ->
                     _ui.update { it.copy(activity = "Preparing PDF, page $page") }
                     GlyphSupport.onSaveProgress((20 + page * 5).coerceAtMost(75))
@@ -643,13 +643,13 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
         if (!initialized) return
         flushPendingSave()
     }
-    private suspend fun persist(draft: Draft, quiet: Boolean = false) {
+    private suspend fun persist(draft: Draft) {
         if (draft.noteId.isEmpty()) return
+        // Autosave is silent: a light show on every debounced write was noise.
+        // Explicit Save As / export / share run their own meters at the call site.
         try {
-            if (!quiet) GlyphSupport.onSaveProgress(20)
             repository.saveNote(draft)
             saveFailureReported = false
-            if (!quiet) GlyphSupport.onSaveDone()
         } catch (failure: Exception) {
             if (failure is CancellationException) throw failure
             if (!saveFailureReported) {
