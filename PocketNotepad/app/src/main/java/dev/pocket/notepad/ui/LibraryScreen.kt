@@ -134,7 +134,7 @@ private fun SwipeToTrashRow(
             ) {
                 CompositionLocalProvider(
                     androidx.compose.material3.LocalContentColor provides Color.White
-                ) { EditorIcon(EditorSymbol.DELETE, "Move to trash") }
+                ) { EditorIcon(EditorSymbol.DELETE, "Move to trash", accent = Color.White) }
             }
         }
         Box(

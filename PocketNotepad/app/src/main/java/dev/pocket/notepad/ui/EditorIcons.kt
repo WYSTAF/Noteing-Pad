@@ -225,9 +225,8 @@ private fun buildPath(segs: List<Seg>, s: Float, ox: Float, oy: Float): Path {
 }
 
 @Composable
-fun EditorIcon(symbol: EditorSymbol, description: String) {
+fun EditorIcon(symbol: EditorSymbol, description: String, accent: Color = AccentRed) {
     val color = LocalContentColor.current
-    val accent = if (color == Color.White) Color.White else AccentRed
     Canvas(Modifier.size(22.dp).semantics { contentDescription = description }) {
         val s = MARK_FILL * min(size.width, size.height) / MARK_SPAN
         val ox = size.width / 2f
