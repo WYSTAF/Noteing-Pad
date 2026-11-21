@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 
@@ -143,15 +144,36 @@ fun SelectionSquare(selected: Boolean) {
     }
 }
 
+/**
+ * Clear on/off switch: filled track with the knob parked RIGHT when on;
+ * hollow outlined track with a dimmed knob LEFT when off. The two states now
+ * differ in fill, border and knob position — not just two swapped gray rects.
+ */
 @Composable
 fun MechanicalToggle(on: Boolean) {
     val scheme = MaterialTheme.colorScheme
-    Canvas(Modifier.size(width = 20.dp, height = 8.dp)) {
-        val ink = scheme.onSurface
-        val off = scheme.outlineVariant
-        drawRect(if (on) ink else off, size = Size(9.dp.toPx(), size.height))
-        drawRect(if (on) off else ink, topLeft = Offset(11.dp.toPx(), 0f),
-            size = Size(9.dp.toPx(), size.height))
+    Canvas(Modifier.size(width = 30.dp, height = 16.dp)) {
+        val w = size.width
+        val h = size.height
+        val knob = 10.dp.toPx()
+        val inset = 2.5.dp.toPx()
+        val radius = CornerRadius(2.dp.toPx(), 2.dp.toPx())
+        if (on) {
+            drawRoundRect(color = scheme.onSurface, size = Size(w, h), cornerRadius = radius)
+        } else {
+            drawRoundRect(
+                color = scheme.outlineVariant, size = Size(w, h), cornerRadius = radius,
+                style = Stroke(width = 1.5.dp.toPx())
+            )
+        }
+        val kx = if (on) w - knob - inset else inset
+        val ky = (h - knob) / 2f
+        drawRoundRect(
+            color = if (on) scheme.surface else scheme.onSurface.copy(alpha = 0.5f),
+            topLeft = Offset(kx, ky),
+            size = Size(knob, knob),
+            cornerRadius = CornerRadius(1.dp.toPx(), 1.dp.toPx())
+        )
     }
 }
 

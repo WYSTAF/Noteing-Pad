@@ -373,8 +373,46 @@ object GlyphSupport {
         scheduleIdleFade(gen)
     }
 
-    /** Export / explicit Save progress: rising meter from BOTTOM to TOP. */
-    fun onSaveProgress(percent: Int) {
+    /** Export / explicit Save progress: falling download meter from TOP to BOTTOM. */
+    fun onExportProgress(percent: Int) {
+        if (!available || !enabled) return
+        lastScrollPercent = -1
+        cancelIdleFade()
+        val gen = animGen.incrementAndGet()
+        val frame = GlyphPatterns.downloadFillFrame(model, percent)
+        worker.execute {
+            if (animGen.get() == gen) sendFrame(frame)
+        }
+    }
+
+    /** Export complete: the download lands — the meter hits the bottom edge, an
+     *  impact flash, a soft full-glyph glow, then dark. */
+    fun onExportDone() {
+        if (!available || !enabled) return
+        lastScrollPercent = -1
+        cancelIdleFade()
+        val gen = animGen.incrementAndGet()
+        val m = model
+        val blank = IntArray(m.channelCount)
+        worker.execute {
+            for (step in intArrayOf(60, 85, 100)) {
+                if (animGen.get() != gen) return@execute
+                sendFrame(GlyphPatterns.downloadFillFrame(m, step))
+                sleepUninterruptibly(20)
+            }
+            if (animGen.get() != gen) return@execute
+            sendFrame(GlyphPatterns.impactFrame(m, atTop = false))
+            sleepUninterruptibly(110)
+            if (animGen.get() != gen) return@execute
+            sendFrame(IntArray(m.channelCount) { GlyphPatterns.LOW_LIGHT })
+            sleepUninterruptibly(80)
+            if (animGen.get() != gen) return@execute
+            sendFrame(blank)
+        }
+    }
+
+    /** Share / Upload progress: rising meter from BOTTOM to TOP (upload away). */
+    fun onShareProgress(percent: Int) {
         if (!available || !enabled) return
         lastScrollPercent = -1
         cancelIdleFade()
@@ -385,41 +423,8 @@ object GlyphSupport {
         }
     }
 
-    /** Explicit Save / Export completed: short rising sweep + confirmation flash. */
-    fun onSaveDone() {
-        if (!available || !enabled) return
-        lastScrollPercent = -1
-        cancelIdleFade()
-        val gen = animGen.incrementAndGet()
-        val m = model
-        val blank = IntArray(m.channelCount)
-        worker.execute {
-            for (step in intArrayOf(40, 75, 100)) {
-                if (animGen.get() != gen) return@execute
-                sendFrame(GlyphPatterns.saveFrame(m, step))
-                sleepUninterruptibly(25)
-            }
-            if (animGen.get() != gen) return@execute
-            sendFrame(GlyphPatterns.doneFlashFrame(m, isShare = false))
-            sleepUninterruptibly(110)
-            if (animGen.get() != gen) return@execute
-            sendFrame(blank)
-        }
-    }
-
-    /** Share / Upload progress: draining meter from TOP to BOTTOM (opposite of Save). */
-    fun onShareProgress(percent: Int) {
-        if (!available || !enabled) return
-        lastScrollPercent = -1
-        cancelIdleFade()
-        val gen = animGen.incrementAndGet()
-        val frame = GlyphPatterns.shareDrainFrame(model, percent)
-        worker.execute {
-            if (animGen.get() == gen) sendFrame(frame)
-        }
-    }
-
-    /** Share completed: quick drain sweep + crisp upward send flash. */
+    /** Share completed: the upload lifts off the top edge — rising steps, top
+     *  impact, upward send flash. */
     fun onShareDone() {
         if (!available || !enabled) return
         lastScrollPercent = -1
@@ -428,13 +433,53 @@ object GlyphSupport {
         val m = model
         val blank = IntArray(m.channelCount)
         worker.execute {
-            for (step in intArrayOf(70, 100)) {
+            for (step in intArrayOf(60, 85, 100)) {
                 if (animGen.get() != gen) return@execute
-                sendFrame(GlyphPatterns.shareDrainFrame(m, step))
-                sleepUninterruptibly(25)
+                sendFrame(GlyphPatterns.saveFrame(m, step))
+                sleepUninterruptibly(20)
             }
             if (animGen.get() != gen) return@execute
+            sendFrame(GlyphPatterns.impactFrame(m, atTop = true))
+            sleepUninterruptibly(90)
+            if (animGen.get() != gen) return@execute
             sendFrame(GlyphPatterns.doneFlashFrame(m, isShare = true))
+            sleepUninterruptibly(90)
+            if (animGen.get() != gen) return@execute
+            sendFrame(blank)
+        }
+    }
+
+    /** Import begins: a complex falling data-stream — two offset comets plus a
+     *  flicker tick per phase, more animated than a plain download. */
+    fun onImportStart() {
+        if (!available || !enabled) return
+        lastScrollPercent = -1
+        cancelIdleFade()
+        val gen = animGen.incrementAndGet()
+        val m = model
+        worker.execute {
+            for (phase in 0 until 6) {
+                if (animGen.get() != gen) return@execute
+                sendFrame(GlyphPatterns.importStreamFrame(m, phase))
+                sleepUninterruptibly(45)
+            }
+        }
+    }
+
+    /** Import complete: the stream lands at the bottom edge — impact + check. */
+    fun onImportDone() {
+        if (!available || !enabled) return
+        lastScrollPercent = -1
+        cancelIdleFade()
+        val gen = animGen.incrementAndGet()
+        val m = model
+        val blank = IntArray(m.channelCount)
+        worker.execute {
+            if (animGen.get() != gen) return@execute
+            sendFrame(GlyphPatterns.impactFrame(m, atTop = false))
+            sleepUninterruptibly(90)
+            if (animGen.get() != gen) return@execute
+            sendFrame(GlyphPatterns.doneFlashFrame(m, isShare = false))
             sleepUninterruptibly(110)
             if (animGen.get() != gen) return@execute
             sendFrame(blank)
@@ -462,39 +507,78 @@ object GlyphSupport {
         }
     }
 
-    /** Back navigation: rapid crisp tap pulse on upper glyph / left arrow on Matrix. */
+    /** Back navigation: the RIGHT side of the glyph snaps for an instant. */
     fun onBack() {
         if (!available || !enabled) return
         lastScrollPercent = -1
         cancelIdleFade()
         val gen = animGen.incrementAndGet()
         val m = model
-        val pulse = GlyphPatterns.backPulseFrame(m)
         val blank = IntArray(m.channelCount)
         worker.execute {
             if (animGen.get() != gen) return@execute
-            sendFrame(pulse)
-            sleepUninterruptibly(70)
+            sendFrame(GlyphPatterns.snapFrame(m, GlyphPatterns.SnapSide.RIGHT))
+            sleepUninterruptibly(50)
             if (animGen.get() != gen) return@execute
             sendFrame(blank)
         }
     }
 
-    /** New / Open note: gentle welcoming glow on the model's signature glyph. */
+    /** New / open note: the LEFT side snaps — the note arrives from the left. */
     fun onNew() {
         if (!available || !enabled) return
         lastScrollPercent = -1
         cancelIdleFade()
         val gen = animGen.incrementAndGet()
         val m = model
-        val pulse = GlyphPatterns.newNotePulseFrame(m)
         val blank = IntArray(m.channelCount)
         worker.execute {
             if (animGen.get() != gen) return@execute
-            sendFrame(pulse)
-            sleepUninterruptibly(90)
+            sendFrame(GlyphPatterns.snapFrame(m, GlyphPatterns.SnapSide.LEFT))
+            sleepUninterruptibly(50)
             if (animGen.get() != gen) return@execute
             sendFrame(blank)
+        }
+    }
+
+    /** Undo: quick double-tick on the LEFT (rewind) — same snap family as
+     *  enter/back but twice, so it reads distinctly. */
+    fun onUndo() {
+        if (!available || !enabled) return
+        lastScrollPercent = -1
+        cancelIdleFade()
+        val gen = animGen.incrementAndGet()
+        val m = model
+        val blank = IntArray(m.channelCount)
+        worker.execute {
+            repeat(2) {
+                if (animGen.get() != gen) return@execute
+                sendFrame(GlyphPatterns.snapFrame(m, GlyphPatterns.SnapSide.LEFT))
+                sleepUninterruptibly(30)
+                if (animGen.get() != gen) return@execute
+                sendFrame(blank)
+                sleepUninterruptibly(20)
+            }
+        }
+    }
+
+    /** Redo: quick double-tick on the RIGHT (forward). */
+    fun onRedo() {
+        if (!available || !enabled) return
+        lastScrollPercent = -1
+        cancelIdleFade()
+        val gen = animGen.incrementAndGet()
+        val m = model
+        val blank = IntArray(m.channelCount)
+        worker.execute {
+            repeat(2) {
+                if (animGen.get() != gen) return@execute
+                sendFrame(GlyphPatterns.snapFrame(m, GlyphPatterns.SnapSide.RIGHT))
+                sleepUninterruptibly(30)
+                if (animGen.get() != gen) return@execute
+                sendFrame(blank)
+                sleepUninterruptibly(20)
+            }
         }
     }
 

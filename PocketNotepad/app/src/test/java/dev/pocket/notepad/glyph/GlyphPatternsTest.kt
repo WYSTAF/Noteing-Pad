@@ -84,4 +84,85 @@ class GlyphPatternsTest {
         // Center pixel of 25x25 (12, 12) must be lit for X
         assertEquals(GlyphPatterns.MAX_LIGHT, phone3Cross[12 * 25 + 12])
     }
+
+    @Test
+    fun directionalSnapsLightExactlyOneHalf() {
+        for (model in NothingModel.entries) {
+            if (model == NothingModel.UNKNOWN || model.isMatrix) continue
+            val left = GlyphPatterns.snapFrame(model, GlyphPatterns.SnapSide.LEFT)
+            val right = GlyphPatterns.snapFrame(model, GlyphPatterns.SnapSide.RIGHT)
+            assertEquals(model.channelCount, left.size)
+            assertEquals(model.channelCount, right.size)
+            // The two halves are disjoint and each lights its own channels.
+            for (i in left.indices) {
+                val l = left[i] > 0
+                val r = right[i] > 0
+                assertTrue("channel $i lit by both halves", !(l && r))
+            }
+            assertTrue("left snap must light LEDs", left.any { it > 0 })
+            assertTrue("right snap must light LEDs", right.any { it > 0 })
+            // Left half of a 2a is C_1..C_12, right half C_13..C_24.
+            if (model == NothingModel.PHONE_2A) {
+                assertEquals(GlyphPatterns.MED_LIGHT, left[0])
+                assertEquals(0, left[12])
+                assertEquals(0, right[0])
+                assertEquals(GlyphPatterns.MED_LIGHT, right[12])
+            }
+        }
+        // Matrix: left/right thirds of columns.
+        val left = GlyphPatterns.snapFrame(NothingModel.PHONE_3_MATRIX, GlyphPatterns.SnapSide.LEFT)
+        val right = GlyphPatterns.snapFrame(NothingModel.PHONE_3_MATRIX, GlyphPatterns.SnapSide.RIGHT)
+        assertEquals(625, left.size)
+        assertEquals(GlyphPatterns.MED_LIGHT, left[0])       // (0,0) top-left
+        assertEquals(0, left[24])                            // top-right col dark
+        assertEquals(0, right[0])
+        assertEquals(GlyphPatterns.MED_LIGHT, right[24])
+    }
+
+    @Test
+    fun cometTravelsDownWhenDownloadingAndUpWhenUploading() {
+        val model = NothingModel.PHONE_2A
+        val top = GlyphPatterns.topToBottomIndices(model).first()
+        val bottom = GlyphPatterns.topToBottomIndices(model).last()
+        assertEquals(GlyphPatterns.MAX_LIGHT, GlyphPatterns.cometFrame(model, 0, fromTop = true)[top])
+        assertEquals(GlyphPatterns.MAX_LIGHT, GlyphPatterns.cometFrame(model, 100, fromTop = true)[bottom])
+        assertEquals(GlyphPatterns.MAX_LIGHT, GlyphPatterns.cometFrame(model, 0, fromTop = false)[bottom])
+        assertEquals(GlyphPatterns.MAX_LIGHT, GlyphPatterns.cometFrame(model, 100, fromTop = false)[top])
+        // Matrix comet stays inside the 2D grid and lights a row.
+        val matrixComet = GlyphPatterns.cometFrame(NothingModel.PHONE_3_MATRIX, 50, fromTop = true)
+        assertEquals(625, matrixComet.size)
+        assertTrue(matrixComet.any { it > 0 })
+    }
+
+    @Test
+    fun downloadFillsTopDownAndImpactsLightTheEdges() {
+        val model = NothingModel.PHONE_2A
+        val half = GlyphPatterns.downloadFillFrame(model, 50)
+        assertEquals(GlyphPatterns.MAX_LIGHT, half[23]) // top of arc lit
+        assertEquals(0, half[0])                        // bottom still dark
+        val bottomImpact = GlyphPatterns.impactFrame(model, atTop = false)
+        assertEquals(GlyphPatterns.MAX_LIGHT, bottomImpact[0])
+        val topImpact = GlyphPatterns.impactFrame(model, atTop = true)
+        assertEquals(GlyphPatterns.MAX_LIGHT, topImpact[23])
+        val matrixImpact = GlyphPatterns.impactFrame(NothingModel.PHONE_4A_PRO_MATRIX, atTop = true)
+        assertEquals(169, matrixImpact.size)
+        assertTrue(matrixImpact.any { it > 0 })
+    }
+
+    @Test
+    fun importStreamPhasesStayInBoundsAndKeepMoving() {
+        for (model in NothingModel.entries) {
+            if (model == NothingModel.UNKNOWN) continue
+            val heads = HashSet<Int>()
+            for (phase in 0 until 6) {
+                val frame = GlyphPatterns.importStreamFrame(model, phase)
+                assertEquals(model.channelCount, frame.size)
+                assertTrue("phase $phase must light something", frame.any { it > 0 })
+                val head = frame.indexOf(GlyphPatterns.MAX_LIGHT)
+                assertTrue("phase $phase must keep a bright head", head >= 0)
+                heads += head
+            }
+            assertTrue("${model.displayName} stream must move", heads.size >= 2)
+        }
+    }
 }

@@ -274,6 +274,128 @@ object GlyphPatterns {
         return frame
     }
 
+    // ---- Directional snap language ------------------------------------------
+
+    enum class SnapSide { LEFT, RIGHT }
+
+    /** Left-half channels — "enter note" snap and undo tick base. */
+    fun leftIndices(model: NothingModel): IntArray = when (model) {
+        NothingModel.PHONE_1 -> intArrayOf(7, 8, 9, 10)
+        NothingModel.PHONE_2 -> (0..7).toList().toIntArray()
+        NothingModel.PHONE_2A, NothingModel.PHONE_2A_PLUS -> (0..11).toList().toIntArray()
+        NothingModel.PHONE_3A -> (0..9).toList().toIntArray()
+        NothingModel.PHONE_4A -> intArrayOf(0, 1, 2)
+        NothingModel.PHONE_4B -> intArrayOf(0, 1)
+        else -> IntArray(0)
+    }
+
+    /** Right-half channels — "back" snap and redo tick base. */
+    fun rightIndices(model: NothingModel): IntArray = when (model) {
+        NothingModel.PHONE_1 -> intArrayOf(11, 12, 13, 14)
+        NothingModel.PHONE_2 -> (25..32).toList().toIntArray()
+        NothingModel.PHONE_2A, NothingModel.PHONE_2A_PLUS -> (12..23).toList().toIntArray()
+        NothingModel.PHONE_3A -> (10..19).toList().toIntArray()
+        NothingModel.PHONE_4A -> intArrayOf(3, 4, 5)
+        NothingModel.PHONE_4B -> intArrayOf(2, 3)
+        else -> IntArray(0)
+    }
+
+    /** Instant one-frame snap: one half of the glyph flashes. */
+    fun snapFrame(model: NothingModel, side: SnapSide): IntArray {
+        if (model.isMatrix) {
+            val grid = IntArray(model.channelCount)
+            val size = model.matrixSize
+            val third = (size / 3).coerceAtLeast(1)
+            val xRange = when (side) {
+                SnapSide.LEFT -> 0 until third
+                SnapSide.RIGHT -> (size - third) until size
+            }
+            for (y in 0 until size) for (x in xRange) grid[y * size + x] = MED_LIGHT
+            return grid
+        }
+        val frame = IntArray(model.channelCount)
+        val indices = if (side == SnapSide.LEFT) leftIndices(model) else rightIndices(model)
+        for (ch in indices) if (ch in frame.indices) frame[ch] = MED_LIGHT
+        return frame
+    }
+
+    /** Falling (download) meter: fills top-to-bottom as the export progresses. */
+    fun downloadFillFrame(model: NothingModel, percent: Int): IntArray {
+        val p = percent.coerceIn(0, 100)
+        if (model.isMatrix) return matrixProgressFrame(model.matrixSize, p, fromTop = true)
+        return fillOrdered(model.channelCount, topToBottomIndices(model), p, MAX_LIGHT)
+    }
+
+    /** Single bright head with a two-step fading trail — the travelling comet. */
+    fun cometFrame(model: NothingModel, percent: Int, fromTop: Boolean): IntArray {
+        val p = percent.coerceIn(0, 100)
+        if (model.isMatrix) return matrixCometFrame(model.matrixSize, p, fromTop)
+        val seq = topToBottomIndices(model)
+        if (seq.isEmpty()) return IntArray(model.channelCount)
+        val ordered = if (fromTop) seq else seq.reversedArray()
+        val pos = (p / 100f * (ordered.size - 1)).roundToInt().coerceIn(0, ordered.size - 1)
+        val frame = IntArray(model.channelCount)
+        frame[ordered[pos]] = MAX_LIGHT
+        if (pos >= 1) frame[ordered[pos - 1]] = MED_LIGHT
+        if (pos >= 2) frame[ordered[pos - 2]] = LOW_LIGHT
+        return frame
+    }
+
+    /** Landing impact: the edge row blazes, its neighbour glows. */
+    fun impactFrame(model: NothingModel, atTop: Boolean): IntArray {
+        if (model.isMatrix) {
+            val grid = IntArray(model.channelCount)
+            val size = model.matrixSize
+            val row = if (atTop) 0 else size - 1
+            val neighbor = if (atTop) 1 else size - 2
+            val center = (size - 1) / 2f
+            val maxR = size / 2f
+            fun inCircle(x: Int, y: Int): Boolean {
+                val dx = x - center
+                val dy = y - center
+                return kotlin.math.sqrt(dx * dx + dy * dy) <= maxR + 0.25f
+            }
+            for (x in 0 until size) {
+                if (inCircle(x, row)) grid[row * size + x] = MAX_LIGHT
+                if (neighbor in 0 until size && inCircle(x, neighbor)) grid[neighbor * size + x] = MED_LIGHT
+            }
+            return grid
+        }
+        val frame = IntArray(model.channelCount)
+        val seq = if (atTop) topToBottomIndices(model) else topToBottomIndices(model).reversedArray()
+        seq.take(2).forEach { if (it in frame.indices) frame[it] = MAX_LIGHT }
+        seq.drop(2).take(2).forEach { if (it in frame.indices) frame[it] = MED_LIGHT }
+        return frame
+    }
+
+    /** Import stream: two offset comets + a data-flicker tick, phase 0..phaseCount. */
+    fun importStreamFrame(model: NothingModel, phase: Int, phaseCount: Int = 6): IntArray {
+        if (model.isMatrix) {
+            val grid = IntArray(model.channelCount)
+            val size = model.matrixSize
+            val r1 = (phase * size / phaseCount).coerceIn(0, size - 1)
+            val r2 = (r1 + size / 2) % size
+            for (x in 0 until size) {
+                grid[r1 * size + x] = MAX_LIGHT
+                grid[r2 * size + x] = MED_LIGHT
+            }
+            val flick = ((phase * 53) % size) * size + ((phase * 91) % size)
+            if (grid[flick] == 0) grid[flick] = LOW_LIGHT
+            return grid
+        }
+        val frame = IntArray(model.channelCount)
+        val seq = topToBottomIndices(model)
+        if (seq.isEmpty()) return frame
+        val p1 = (phase * seq.size / phaseCount).coerceIn(0, seq.size - 1)
+        val p2 = (p1 + seq.size / 2) % seq.size
+        frame[seq[p1]] = MAX_LIGHT
+        frame[seq[p2]] = MED_LIGHT
+        if (p1 >= 1) frame[seq[p1 - 1]] = LOW_LIGHT
+        val flick = (phase * 7 + 5) % frame.size
+        if (frame[flick] == 0) frame[flick] = LOW_LIGHT
+        return frame
+    }
+
     // ---- 2D Glyph Matrix Generators (Phone 3: 25x25, Phone 4a Pro: 13x13) ----
 
     fun matrixProgressFrame(size: Int, percent: Int, fromTop: Boolean): IntArray {
@@ -304,6 +426,34 @@ object GlyphPatterns {
                 } else if (onRim && rowLit) {
                     grid[y * size + x] = MED_LIGHT
                 }
+            }
+        }
+        return grid
+    }
+
+    /** A comet sweeping across the matrix: one blazing row plus two trail rows. */
+    fun matrixCometFrame(size: Int, percent: Int, fromTop: Boolean): IntArray {
+        if (size <= 0) return IntArray(0)
+        val grid = IntArray(size * size)
+        val p = percent.coerceIn(0, 100)
+        val row = (p / 100f * (size - 1)).roundToInt().coerceIn(0, size - 1)
+        val head = if (fromTop) row else size - 1 - row
+        val t1 = if (fromTop) head - 1 else head + 1
+        val t2 = if (fromTop) head - 2 else head + 2
+        val center = (size - 1) / 2f
+        val maxR = size / 2f
+        for (y in 0 until size) {
+            val value = when (y) {
+                head -> MAX_LIGHT
+                t1 -> MED_LIGHT
+                t2 -> LOW_LIGHT
+                else -> 0
+            }
+            if (value == 0) continue
+            for (x in 0 until size) {
+                val dx = x - center
+                val dy = y - center
+                if (kotlin.math.sqrt(dx * dx + dy * dy) <= maxR + 0.25f) grid[y * size + x] = value
             }
         }
         return grid

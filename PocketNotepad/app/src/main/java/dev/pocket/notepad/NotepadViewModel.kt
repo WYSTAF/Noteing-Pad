@@ -166,6 +166,7 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
     fun undo() {
         if (blocked) return
         val edit = history.undo() ?: return
+        GlyphSupport.onUndo()
         val state = _ui.value
         selection = edit.beforeSelection.bounded(edit.before.length)
         _ui.value = state.copy(root = edit.before, revision = state.revision + 1,
@@ -177,6 +178,7 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
     fun redo() {
         if (blocked) return
         val edit = history.redo() ?: return
+        GlyphSupport.onRedo()
         val state = _ui.value
         selection = edit.afterSelection.bounded(edit.after.length)
         _ui.value = state.copy(root = edit.after, revision = state.revision + 1,
@@ -435,6 +437,7 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
         _ui.update { it.copy(busy = true, activity = "Importing UTF-8 text") }
         viewModelScope.launch {
             try {
+                GlyphSupport.onImportStart()
                 val draft = repository.importAsNote(uri)
                 selection = draft.selection.bounded(draft.root.length)
                 history.clear()
@@ -453,7 +456,7 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
                     canRedo = false,
                     screen = Screen.EDITOR
                 )
-                GlyphSupport.onNew()
+                GlyphSupport.onImportDone()
                 requestSave()
             } catch (failure: Exception) {
                 if (failure is CancellationException) throw failure
@@ -516,14 +519,14 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
         _ui.update { it.copy(busy = true, activity = if (spec.isPdf) "Preparing PDF" else "Preparing UTF-8 file") }
         viewModelScope.launch {
             try {
-                GlyphSupport.onSaveProgress(20)
+                GlyphSupport.onExportProgress(20)
                 // Flush storage before another activity takes focus.
                 persist(makeDraft())
                 val name = exporter.stage(source.root, spec) { page ->
                     _ui.update { it.copy(activity = "Preparing PDF, page $page") }
-                    GlyphSupport.onSaveProgress((20 + page * 5).coerceAtMost(75))
+                    GlyphSupport.onExportProgress((20 + page * 5).coerceAtMost(75))
                 }
-                GlyphSupport.onSaveProgress(80)
+                GlyphSupport.onExportProgress(80)
                 val pending = PendingExport(name, spec, source.revision, session, noteId = source.noteId)
                 storePending(pending)
                 _ui.update { it.copy(pendingExport = pending) }
@@ -554,7 +557,7 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
             _ui.update { it.copy(busy = true, activity = if (uri == null) "Canceling export" else "Writing file") }
             try {
                 if (uri != null) {
-                    GlyphSupport.onSaveProgress(90)
+                    GlyphSupport.onExportProgress(90)
                     val actualName = exporter.publish(pending, uri)
                     val state = _ui.value
                     if (!pending.spec.isPdf && pending.session == session && pending.sourceRevision == state.revision) {
@@ -566,7 +569,7 @@ class NotepadViewModel(application: Application, private val savedState: SavedSt
                     } else if (actualName == null) {
                         notify("File saved. This provider did not return a display name; verify the extension in Files.")
                     } else notify("Saved $actualName")
-                    GlyphSupport.onSaveDone()
+                    GlyphSupport.onExportDone()
                 } else {
                     GlyphSupport.turnOff()
                 }
