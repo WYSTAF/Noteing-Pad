@@ -185,4 +185,24 @@ class GlyphPatternsTest {
                 (left + right).all { it in 0 until model.channelCount })
         }
     }
+
+    @Test
+    fun matrixDiskFillSweepsTheWholeCircularDisplay() {
+        for (model in listOf(NothingModel.PHONE_3_MATRIX, NothingModel.PHONE_4A_PRO_MATRIX)) {
+            val size = model.matrixSize
+            val downloadStart = GlyphPatterns.downloadFillFrame(model, 5)
+            val downloadDone = GlyphPatterns.downloadFillFrame(model, 100)
+            val uploadStart = GlyphPatterns.saveFrame(model, 5)
+            assertEquals(model.channelCount, downloadStart.size)
+            assertEquals(model.channelCount, downloadDone.size)
+            // Download: top edge is the bright leading row.
+            assertEquals(GlyphPatterns.MAX_LIGHT, downloadStart[size / 2])
+            // Upload: bottom edge is the bright leading row.
+            assertEquals(GlyphPatterns.MAX_LIGHT, uploadStart[(size - 1) * size + size / 2])
+            // The full disk fills (not just a sparse center gauge), but pixels
+            // outside the circular mask stay dark.
+            assertTrue(downloadDone.count { it > 0 } > size * size / 2)
+            assertEquals(0, downloadDone[0])
+        }
+    }
 }

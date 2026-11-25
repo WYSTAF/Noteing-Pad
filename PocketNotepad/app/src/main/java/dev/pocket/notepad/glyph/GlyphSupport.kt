@@ -14,6 +14,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.abs
 
 /**
  * Nothing Glyph & Glyph Matrix engine — official GDK (com.nothing.ketchum,
@@ -53,6 +54,8 @@ object GlyphSupport {
     }
     private val animGen = AtomicLong(0L)
     @Volatile private var lastScrollPercent = -1
+    @Volatile private var shownDownload = 0
+    @Volatile private var shownUpload = 0
     @Volatile private var pendingIdleFade: ScheduledFuture<*>? = null
 
     fun setEnabled(on: Boolean, triggerPulse: Boolean = false) {
@@ -373,20 +376,36 @@ object GlyphSupport {
         scheduleIdleFade(gen)
     }
 
-    /** Export / explicit Save progress: falling download meter from TOP to BOTTOM. */
+    /** Export / explicit Save progress: a slow falling download slide. The
+     *  staging code reports coarse steps (20 -> 80 -> 90); interpolate them so
+     *  they read as a slide, not a flash. A backward target starts a new run. */
     fun onExportProgress(percent: Int) {
         if (!available || !enabled) return
         lastScrollPercent = -1
         cancelIdleFade()
         val gen = animGen.incrementAndGet()
-        val frame = GlyphPatterns.downloadFillFrame(model, percent)
+        val target = percent.coerceIn(0, 100)
+        val m = model
         worker.execute {
-            if (animGen.get() == gen) sendFrame(frame)
+            val start = if (target < shownDownload) 0 else shownDownload
+            if (start == target) {
+                shownDownload = target
+                sendFrame(GlyphPatterns.downloadFillFrame(m, target))
+                return@execute
+            }
+            val steps = ((abs(target - start) + 2) / 3).coerceIn(3, 18)
+            for (step in 1..steps) {
+                if (animGen.get() != gen) return@execute
+                val value = start + (target - start) * step / steps
+                shownDownload = value
+                sendFrame(GlyphPatterns.downloadFillFrame(m, value))
+                sleepUninterruptibly(45)
+            }
         }
     }
 
-    /** Export complete: the download lands — the meter hits the bottom edge, an
-     *  impact flash, a soft full-glyph glow, then dark. */
+    /** Export complete: the slow download slide reaches the bottom edge, then
+     *  an impact flash, a soft full-glyph glow, then dark. */
     fun onExportDone() {
         if (!available || !enabled) return
         lastScrollPercent = -1
@@ -395,35 +414,54 @@ object GlyphSupport {
         val m = model
         val blank = IntArray(m.channelCount)
         worker.execute {
-            for (step in intArrayOf(60, 85, 100)) {
+            val start = shownDownload
+            val steps = ((abs(100 - start) + 3) / 4).coerceIn(2, 12)
+            for (step in 1..steps) {
                 if (animGen.get() != gen) return@execute
-                sendFrame(GlyphPatterns.downloadFillFrame(m, step))
-                sleepUninterruptibly(20)
+                val value = start + (100 - start) * step / steps
+                shownDownload = value
+                sendFrame(GlyphPatterns.downloadFillFrame(m, value))
+                sleepUninterruptibly(50)
             }
             if (animGen.get() != gen) return@execute
             sendFrame(GlyphPatterns.impactFrame(m, atTop = false))
-            sleepUninterruptibly(110)
+            sleepUninterruptibly(130)
             if (animGen.get() != gen) return@execute
             sendFrame(IntArray(m.channelCount) { GlyphPatterns.LOW_LIGHT })
-            sleepUninterruptibly(80)
+            sleepUninterruptibly(100)
             if (animGen.get() != gen) return@execute
             sendFrame(blank)
         }
     }
 
-    /** Share / Upload progress: rising meter from BOTTOM to TOP (upload away). */
+    /** Share / Upload progress: slow rising slide from BOTTOM to TOP. Coarse
+     *  staging steps are interpolated so the upload visibly travels. */
     fun onShareProgress(percent: Int) {
         if (!available || !enabled) return
         lastScrollPercent = -1
         cancelIdleFade()
         val gen = animGen.incrementAndGet()
-        val frame = GlyphPatterns.saveFrame(model, percent)
+        val target = percent.coerceIn(0, 100)
+        val m = model
         worker.execute {
-            if (animGen.get() == gen) sendFrame(frame)
+            val start = if (target < shownUpload) 0 else shownUpload
+            if (start == target) {
+                shownUpload = target
+                sendFrame(GlyphPatterns.saveFrame(m, target))
+                return@execute
+            }
+            val steps = ((abs(target - start) + 2) / 3).coerceIn(3, 18)
+            for (step in 1..steps) {
+                if (animGen.get() != gen) return@execute
+                val value = start + (target - start) * step / steps
+                shownUpload = value
+                sendFrame(GlyphPatterns.saveFrame(m, value))
+                sleepUninterruptibly(45)
+            }
         }
     }
 
-    /** Share completed: the upload lifts off the top edge — rising steps, top
+    /** Share completed: the slow upload slide reaches the top edge — top
      *  impact, upward send flash. */
     fun onShareDone() {
         if (!available || !enabled) return
@@ -433,17 +471,21 @@ object GlyphSupport {
         val m = model
         val blank = IntArray(m.channelCount)
         worker.execute {
-            for (step in intArrayOf(60, 85, 100)) {
+            val start = shownUpload
+            val steps = ((abs(100 - start) + 3) / 4).coerceIn(2, 12)
+            for (step in 1..steps) {
                 if (animGen.get() != gen) return@execute
-                sendFrame(GlyphPatterns.saveFrame(m, step))
-                sleepUninterruptibly(20)
+                val value = start + (100 - start) * step / steps
+                shownUpload = value
+                sendFrame(GlyphPatterns.saveFrame(m, value))
+                sleepUninterruptibly(50)
             }
             if (animGen.get() != gen) return@execute
             sendFrame(GlyphPatterns.impactFrame(m, atTop = true))
-            sleepUninterruptibly(90)
+            sleepUninterruptibly(100)
             if (animGen.get() != gen) return@execute
             sendFrame(GlyphPatterns.doneFlashFrame(m, isShare = true))
-            sleepUninterruptibly(90)
+            sleepUninterruptibly(100)
             if (animGen.get() != gen) return@execute
             sendFrame(blank)
         }

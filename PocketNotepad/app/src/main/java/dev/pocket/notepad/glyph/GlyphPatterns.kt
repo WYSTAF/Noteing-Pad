@@ -188,7 +188,7 @@ object GlyphPatterns {
     /** Save meter: fills from BOTTOM to TOP (rising progress meter). */
     fun saveFrame(model: NothingModel, percent: Int): IntArray {
         val p = percent.coerceIn(0, 100)
-        if (model.isMatrix) return matrixProgressFrame(model.matrixSize, p, fromTop = false)
+        if (model.isMatrix) return matrixDiskFillFrame(model.matrixSize, p, fromTop = false)
         val bottomUp = topToBottomIndices(model).reversedArray()
         return fillOrdered(model.channelCount, bottomUp, p, MAX_LIGHT)
     }
@@ -365,7 +365,7 @@ object GlyphPatterns {
     /** Falling (download) meter: fills top-to-bottom as the export progresses. */
     fun downloadFillFrame(model: NothingModel, percent: Int): IntArray {
         val p = percent.coerceIn(0, 100)
-        if (model.isMatrix) return matrixProgressFrame(model.matrixSize, p, fromTop = true)
+        if (model.isMatrix) return matrixDiskFillFrame(model.matrixSize, p, fromTop = true)
         return fillOrdered(model.channelCount, topToBottomIndices(model), p, MAX_LIGHT)
     }
 
@@ -468,6 +468,39 @@ object GlyphPatterns {
                     grid[y * size + x] = 450 // faint track
                 } else if (onRim && rowLit) {
                     grid[y * size + x] = MED_LIGHT
+                }
+            }
+        }
+        return grid
+    }
+
+    /**
+     * Full-disk progressive fill for the Phone (3) 25x25 and Phone (4a) Pro
+     * 13x13 Glyph Matrix. Unlike the sparse scroll gauge, the whole circular
+     * display lights row-by-row: a blazing leading edge, two medium trail rows,
+     * a low-light filled body and a faint unfilled track inside the circle.
+     */
+    fun matrixDiskFillFrame(size: Int, percent: Int, fromTop: Boolean): IntArray {
+        if (size <= 0) return IntArray(0)
+        val grid = IntArray(size * size)
+        val p = percent.coerceIn(0, 100)
+        if (p == 0) return grid
+        val center = (size - 1) / 2f
+        val maxR = size / 2f
+        val filledRows = (p / 100f * size).roundToInt().coerceIn(0, size)
+        val edge = if (fromTop) filledRows - 1 else size - filledRows
+        for (y in 0 until size) {
+            for (x in 0 until size) {
+                val dx = x - center
+                val dy = y - center
+                if (kotlin.math.sqrt(dx * dx + dy * dy) > maxR + 0.25f) continue
+                val lit = if (fromTop) y < filledRows else y >= size - filledRows
+                val distance = if (fromTop) edge - y else y - edge
+                grid[y * size + x] = when {
+                    lit && y == edge -> MAX_LIGHT
+                    lit && distance <= 1 -> MED_LIGHT
+                    lit -> LOW_LIGHT
+                    else -> 100
                 }
             }
         }
