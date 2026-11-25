@@ -1,6 +1,7 @@
 package dev.pocket.notepad.glyph
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -109,14 +110,16 @@ class GlyphPatternsTest {
                 assertEquals(GlyphPatterns.MED_LIGHT, right[12])
             }
         }
-        // Matrix: left/right thirds of columns.
+        // Matrix: bespoke left/right chevron icons, not column thirds.
         val left = GlyphPatterns.snapFrame(NothingModel.PHONE_3_MATRIX, GlyphPatterns.SnapSide.LEFT)
         val right = GlyphPatterns.snapFrame(NothingModel.PHONE_3_MATRIX, GlyphPatterns.SnapSide.RIGHT)
         assertEquals(625, left.size)
-        assertEquals(GlyphPatterns.MED_LIGHT, left[0])       // (0,0) top-left
-        assertEquals(0, left[24])                            // top-right col dark
+        assertEquals(625, right.size)
+        assertTrue(left.any { it > 0 })
+        assertTrue(right.any { it > 0 })
+        assertFalse(left.contentEquals(right))
+        assertEquals(0, left[0]) // outside the circular mask
         assertEquals(0, right[0])
-        assertEquals(GlyphPatterns.MED_LIGHT, right[24])
     }
 
     @Test
@@ -190,9 +193,9 @@ class GlyphPatternsTest {
     fun matrixDiskFillSweepsTheWholeCircularDisplay() {
         for (model in listOf(NothingModel.PHONE_3_MATRIX, NothingModel.PHONE_4A_PRO_MATRIX)) {
             val size = model.matrixSize
-            val downloadStart = GlyphPatterns.downloadFillFrame(model, 5)
-            val downloadDone = GlyphPatterns.downloadFillFrame(model, 100)
-            val uploadStart = GlyphPatterns.saveFrame(model, 5)
+            val downloadStart = GlyphPatterns.matrixDiskFillFrame(size, 5, fromTop = true)
+            val downloadDone = GlyphPatterns.matrixDiskFillFrame(size, 100, fromTop = true)
+            val uploadStart = GlyphPatterns.matrixDiskFillFrame(size, 5, fromTop = false)
             assertEquals(model.channelCount, downloadStart.size)
             assertEquals(model.channelCount, downloadDone.size)
             // Download: top edge is the bright leading row.
@@ -203,6 +206,41 @@ class GlyphPatternsTest {
             // outside the circular mask stay dark.
             assertTrue(downloadDone.count { it > 0 } > size * size / 2)
             assertEquals(0, downloadDone[0])
+        }
+    }
+
+    @Test
+    fun bespokeMatrixIconsAreValidOnBothMatrixSizes() {
+        for (size in listOf(25, 13)) {
+            val frames = ArrayList<IntArray>().apply {
+                for (p in listOf(0, 50, 100)) {
+                    add(GlyphPatterns.matrixFileFrame(size, p, goingDown = true))
+                    add(GlyphPatterns.matrixFileFrame(size, p, goingDown = false))
+                }
+                for (phase in 0 until 6) add(GlyphPatterns.matrixSaveFrame(size, phase, 6))
+                for (phase in 0 until 5) add(GlyphPatterns.matrixSendFrame(size, phase, 5))
+                for (phase in 0 until 6) add(GlyphPatterns.matrixImportFrame(size, phase, 6))
+                for (p in listOf(0, 50, 100)) add(GlyphPatterns.matrixCheckFrame(size, p))
+                add(GlyphPatterns.matrixArrowFrame(size, GlyphPatterns.MatrixDirection.LEFT))
+                add(GlyphPatterns.matrixArrowFrame(size, GlyphPatterns.MatrixDirection.RIGHT))
+                add(GlyphPatterns.matrixArrowFrame(size, GlyphPatterns.MatrixDirection.LEFT, double = true))
+                add(GlyphPatterns.matrixArrowFrame(size, GlyphPatterns.MatrixDirection.RIGHT, double = true))
+            }
+            frames.forEachIndexed { index, frame ->
+                assertEquals("size $size frame $index", size * size, frame.size)
+                assertTrue("size $size frame $index must light pixels", frame.any { it > 0 })
+                assertEquals("size $size frame $index circular mask", 0, frame[0])
+            }
+            assertFalse(GlyphPatterns.matrixFileFrame(size, 50, true)
+                .contentEquals(GlyphPatterns.matrixFileFrame(size, 50, false)))
+            assertFalse(GlyphPatterns.matrixArrowFrame(size, GlyphPatterns.MatrixDirection.LEFT)
+                .contentEquals(GlyphPatterns.matrixArrowFrame(size, GlyphPatterns.MatrixDirection.RIGHT)))
+            var previous = -1
+            for (p in listOf(0, 25, 50, 75, 100)) {
+                val lit = GlyphPatterns.matrixCheckFrame(size, p).count { it > 0 }
+                assertTrue("check must draw forward", lit >= previous)
+                previous = lit
+            }
         }
     }
 }

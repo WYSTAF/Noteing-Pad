@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/android-8.0%2B-3DDC84?logo=android" alt="Android 8.0+" />
   <img src="https://img.shields.io/badge/license-All%20Rights%20Reserved-D92C35" alt="License" />
   <img src="https://img.shields.io/badge/glyph-Nothing%20GDK-111111" alt="Nothing GDK" />
-  <img src="https://img.shields.io/badge/tests-47%20JVM-3DDC84" alt="47 JVM tests" />
+  <img src="https://img.shields.io/badge/tests-48%20JVM-3DDC84" alt="48 JVM tests" />
 </p>
 
 A plain-text notepad for Android with Nothing Glyph integration — developed by Byteus Studio. Built to be a
@@ -18,16 +18,21 @@ files on your device; nothing leaves it.
 
 > Black sheet, red pen-dot — the whole app in one mark.
 
-## What's new in v1.9.5
+## What's new in v1.9.6
 
-- **Download/upload now slide, not flash.** Coarse staging steps (20 → 80 → 90)
-  are interpolated into a visible 300–600 ms motion, and the finale continues
-  from the current position. Enter/back/undo/redo snaps and the delete blink are
-  unchanged.
-- **Nothing Phone (3) Matrix gets its own full-disk animation.** Download fills
-  the circular **25×25** display top-to-bottom and share fills it bottom-to-top,
-  with a blazing leading edge and a faint unfilled track — instead of the sparse
-  scroll-gauge pattern. Phone (4a) Pro Matrix (**13×13**) uses the same treatment.
+- **A bespoke animated Glyph Matrix icon set for both Matrix phones.** Phone (3)
+  (**25×25**) and Phone (4a) Pro (**13×13**) now get hand-designed pixel icons,
+  drawn with a shared painter and circular mask:
+  - a folded-corner **file drops into a tray** on export, with a fading trail;
+  - a **file rises with motion streaks** on share;
+  - the save finale lands the file and **draws a checkmark** with sparkles;
+  - share lifts off with a **self-drawing upward arrow**;
+  - import sends **three staggered pages in from the left**;
+  - enter/back use directional chevrons, while undo/redo use distinct
+    **double chevrons**.
+- **Slow, visible slides.** Export/upload progress is interpolated across
+  300–600 ms instead of flashing; the finale continues from the current
+  position. Delete double-blink and the import stream remain intact.
 - **Verified channel maps for every Phone series.** Every index cross-checked
   against the official Glyph Developer Kit docs and layout diagrams — meters and
   comets now sweep the whole phone body (all 15/33/26/36/6/4 LEDs), not one strip.
@@ -84,7 +89,7 @@ reuse — the unit tests pin the parts that matter.
 
 ## Testing
 
-47 JVM unit tests cover rope operations, undo history and budgets, Markdown
+48 JVM unit tests cover rope operations, undo history and budgets, Markdown
 editing and block parsing, task offsets, alignment toggles, numbered-list
 toggling, gutter activation, export specs, UTF-8 codec edges, icon path parsing,
 and every Glyph pattern for every model — including invariants that each
@@ -99,7 +104,7 @@ Requirements: Android Studio, JDK 17, an Android SDK with platform 35.
 ```bash
 cd PocketNotepad
 ./gradlew assembleDebug        # app-debug.apk
-./gradlew testDebugUnitTest    # 47 JVM tests
+./gradlew testDebugUnitTest    # 48 JVM tests
 ```
 
 The Nothing Glyph SDK ships in `app/libs/glyph-sdk-2.0.aar`, so no extra
@@ -126,7 +131,7 @@ the app's private storage and never leave the device.
     │   ├── glyph/            # Nothing Glyph SDK bridge + per-device patterns
     │   ├── ui/               # Compose screens + the EditText surface
     │   └── MainActivity.kt
-    ├── app/src/test/         # 47 JVM unit tests
+    ├── app/src/test/         # 48 JVM unit tests
     └── app/src/androidTest/  # PDF exporter instrumented tests
 ```
 

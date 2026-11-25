@@ -188,7 +188,7 @@ object GlyphPatterns {
     /** Save meter: fills from BOTTOM to TOP (rising progress meter). */
     fun saveFrame(model: NothingModel, percent: Int): IntArray {
         val p = percent.coerceIn(0, 100)
-        if (model.isMatrix) return matrixDiskFillFrame(model.matrixSize, p, fromTop = false)
+        if (model.isMatrix) return matrixFileFrame(model.matrixSize, p, goingDown = false)
         val bottomUp = topToBottomIndices(model).reversedArray()
         return fillOrdered(model.channelCount, bottomUp, p, MAX_LIGHT)
     }
@@ -346,15 +346,8 @@ object GlyphPatterns {
     /** Instant one-frame snap: one half of the glyph flashes. */
     fun snapFrame(model: NothingModel, side: SnapSide): IntArray {
         if (model.isMatrix) {
-            val grid = IntArray(model.channelCount)
-            val size = model.matrixSize
-            val third = (size / 3).coerceAtLeast(1)
-            val xRange = when (side) {
-                SnapSide.LEFT -> 0 until third
-                SnapSide.RIGHT -> (size - third) until size
-            }
-            for (y in 0 until size) for (x in xRange) grid[y * size + x] = MED_LIGHT
-            return grid
+            val direction = if (side == SnapSide.LEFT) MatrixDirection.LEFT else MatrixDirection.RIGHT
+            return matrixArrowFrame(model.matrixSize, direction)
         }
         val frame = IntArray(model.channelCount)
         val indices = if (side == SnapSide.LEFT) leftIndices(model) else rightIndices(model)
@@ -365,7 +358,7 @@ object GlyphPatterns {
     /** Falling (download) meter: fills top-to-bottom as the export progresses. */
     fun downloadFillFrame(model: NothingModel, percent: Int): IntArray {
         val p = percent.coerceIn(0, 100)
-        if (model.isMatrix) return matrixDiskFillFrame(model.matrixSize, p, fromTop = true)
+        if (model.isMatrix) return matrixFileFrame(model.matrixSize, p, goingDown = true)
         return fillOrdered(model.channelCount, topToBottomIndices(model), p, MAX_LIGHT)
     }
 
@@ -413,19 +406,7 @@ object GlyphPatterns {
 
     /** Import stream: two offset comets + a data-flicker tick, phase 0..phaseCount. */
     fun importStreamFrame(model: NothingModel, phase: Int, phaseCount: Int = 6): IntArray {
-        if (model.isMatrix) {
-            val grid = IntArray(model.channelCount)
-            val size = model.matrixSize
-            val r1 = (phase * size / phaseCount).coerceIn(0, size - 1)
-            val r2 = (r1 + size / 2) % size
-            for (x in 0 until size) {
-                grid[r1 * size + x] = MAX_LIGHT
-                grid[r2 * size + x] = MED_LIGHT
-            }
-            val flick = ((phase * 53) % size) * size + ((phase * 91) % size)
-            if (grid[flick] == 0) grid[flick] = LOW_LIGHT
-            return grid
-        }
+        if (model.isMatrix) return matrixImportFrame(model.matrixSize, phase, phaseCount)
         val frame = IntArray(model.channelCount)
         val seq = topToBottomIndices(model)
         if (seq.isEmpty()) return frame
@@ -505,6 +486,257 @@ object GlyphPatterns {
             }
         }
         return grid
+    }
+
+    // ---- Hand-designed animated Matrix icons (Phone 3: 25x25, 4a Pro: 13x13) ----
+
+    enum class MatrixDirection { LEFT, RIGHT, UP }
+
+    /** Tiny deterministic pixel painter shared by every Matrix icon so the
+     *  25x25 and 13x13 displays get the same visual language. */
+    private class MatrixPainter(val size: Int) {
+        val pixels = IntArray(size * size)
+        val center = size / 2
+        val span = (size / 3).coerceAtLeast(2)
+        private val thickness = if (size >= 20) 2 else 1
+
+        fun dot(x: Int, y: Int, value: Int) {
+            if (x !in 0 until size || y !in 0 until size) return
+            val index = y * size + x
+            if (value > pixels[index]) pixels[index] = value
+        }
+
+        private fun brush(x: Int, y: Int, value: Int) {
+            val radius = thickness / 2
+            for (dy in -radius..radius) for (dx in -radius..radius) dot(x + dx, y + dy, value)
+        }
+
+        fun line(x1: Int, y1: Int, x2: Int, y2: Int, value: Int) {
+            var x = x1
+            var y = y1
+            val dx = abs(x2 - x1)
+            val sx = if (x1 < x2) 1 else -1
+            val dy = -abs(y2 - y1)
+            val sy = if (y1 < y2) 1 else -1
+            var error = dx + dy
+            while (true) {
+                brush(x, y, value)
+                if (x == x2 && y == y2) break
+                val twice = 2 * error
+                if (twice >= dy) { error += dy; x += sx }
+                if (twice <= dx) { error += dx; y += sy }
+            }
+        }
+
+        fun outlineRect(left: Int, top: Int, width: Int, height: Int, value: Int) {
+            line(left, top, left + width, top, value)
+            line(left + width, top, left + width, top + height, value)
+            line(left + width, top + height, left, top + height, value)
+            line(left, top + height, left, top, value)
+        }
+
+        fun file(cx: Int, cy: Int, value: Int = MAX_LIGHT) {
+            val width = maxOf(4, size * 7 / 25)
+            val height = maxOf(5, size * 10 / 25)
+            val left = cx - width / 2
+            val top = cy - height / 2
+            outlineRect(left, top, width, height, value)
+            val fold = maxOf(1, width / 3)
+            line(left + width - fold, top, left + width - fold, top + fold, value)
+            line(left + width - fold, top + fold, left + width, top + fold, value)
+            line(left + 1, top + fold + 1, left + width - 1, top + fold + 1, MED_LIGHT)
+            if (height >= 7) line(left + 1, top + height - 2, left + width - 1, top + height - 2, LOW_LIGHT)
+        }
+
+        fun tray(y: Int, value: Int) {
+            line(center - span, y, center - span, y + 1, value)
+            line(center - span, y + 1, center + span, y + 1, value)
+            line(center + span, y + 1, center + span, y, value)
+        }
+
+        fun arrow(direction: MatrixDirection, value: Int = MAX_LIGHT, double: Boolean = false) {
+            val reach = maxOf(3, size / 5)
+            val offsets = if (double) listOf(-1, 1) else listOf(0)
+            for (offset in offsets) {
+                when (direction) {
+                    MatrixDirection.LEFT -> {
+                        line(center + reach, center - reach + offset, center - reach, center + offset, value)
+                        line(center - reach, center + offset, center + reach, center + reach + offset, value)
+                    }
+                    MatrixDirection.RIGHT -> {
+                        line(center - reach, center - reach + offset, center + reach, center + offset, value)
+                        line(center + reach, center + offset, center - reach, center + reach + offset, value)
+                    }
+                    MatrixDirection.UP -> {
+                        line(center, center + reach, center, center - reach + offset, value)
+                        line(center - reach, center - reach + reach / 2 + offset, center, center - reach + offset, value)
+                        line(center, center - reach + offset, center + reach, center - reach + reach / 2 + offset, value)
+                    }
+                }
+            }
+        }
+
+        fun check(progress: Float, value: Int = MAX_LIGHT) {
+            val p = progress.coerceIn(0f, 1f)
+            val left = center - span
+            val midX = center - span / 3
+            val midY = center + span / 2
+            val right = center + span
+            val top = center - span
+            val first = (p * 2f).coerceAtMost(1f)
+            line(left, center,
+                left + ((midX - left) * first).roundToInt(),
+                center + ((midY - center) * first).roundToInt(), value)
+            if (p > 0.5f) {
+                val second = (p - 0.5f) * 2f
+                line(midX, midY,
+                    midX + ((right - midX) * second).roundToInt(),
+                    midY - ((midY - top) * second).roundToInt(), value)
+            }
+        }
+
+        fun ring(value: Int = 100) {
+            val radius = (size / 2 - 1).coerceAtLeast(1)
+            var x = radius
+            var y = 0
+            var error = 1 - radius
+            fun plot8(px: Int, py: Int) {
+                dot(center + px, center + py, value); dot(center - px, center + py, value)
+                dot(center + px, center - py, value); dot(center - px, center - py, value)
+                dot(center + py, center + px, value); dot(center - py, center + px, value)
+                dot(center + py, center - px, value); dot(center - py, center - px, value)
+            }
+            while (x >= y) {
+                plot8(x, y); y++
+                if (error < 0) error += 2 * y + 1
+                else { x--; error += 2 * (y - x) + 1 }
+            }
+        }
+
+        fun sparkles(value: Int = MED_LIGHT) {
+            val radius = span + 1
+            dot(center - radius, center - radius, value)
+            dot(center + radius, center - radius, value)
+            dot(center + radius, center + radius, value)
+        }
+
+        fun masked(): IntArray {
+            val centerF = (size - 1) / 2f
+            val maxR = size / 2f + 0.25f
+            for (y in 0 until size) for (x in 0 until size) {
+                val dx = x - centerF
+                val dy = y - centerF
+                if (kotlin.math.sqrt(dx * dx + dy * dy) > maxR) pixels[y * size + x] = 0
+            }
+            return pixels
+        }
+    }
+
+    /** A page with a folded corner travelling down (export) or up (share),
+     *  leaving a two-step trail and landing in a tray. */
+    fun matrixFileFrame(size: Int, percent: Int, goingDown: Boolean): IntArray {
+        if (size <= 0) return IntArray(0)
+        val p = MatrixPainter(size)
+        p.ring()
+        val fraction = percent.coerceIn(0, 100) / 100f
+        val top = 2
+        val bottom = (size - 4).coerceAtLeast(top)
+        val y = if (goingDown) top + ((bottom - top) * fraction).roundToInt()
+            else bottom - ((bottom - top) * fraction).roundToInt()
+        val trail = if (goingDown) -1 else 1
+        p.line(p.center, y + trail * 2, p.center, y + trail * 3, MED_LIGHT)
+        p.dot(p.center, y + trail * 4, LOW_LIGHT)
+        p.file(p.center, y, MAX_LIGHT)
+        val trayY = if (goingDown) size - 3 else 2
+        p.tray(trayY, if (fraction > 0.55f) MED_LIGHT else LOW_LIGHT)
+        return p.masked()
+    }
+
+    /** Save finale: the file descends, lands in the tray, then a check draws
+     *  itself over it with four corner sparkles. */
+    fun matrixSaveFrame(size: Int, phase: Int, frameCount: Int): IntArray {
+        if (size <= 0) return IntArray(0)
+        val p = MatrixPainter(size)
+        p.ring()
+        val t = phase.coerceIn(0, frameCount - 1).toFloat() / (frameCount - 1).coerceAtLeast(1)
+        val y = p.center - 3 + (t * 4).roundToInt().coerceAtMost(p.center + 1)
+        p.file(p.center, y, if (t < 0.65f) MAX_LIGHT else MED_LIGHT)
+        p.tray(size - 3, MED_LIGHT)
+        if (t >= 0.5f) p.check((t - 0.5f) / 0.5f, MAX_LIGHT)
+        if (t > 0.85f) p.sparkles()
+        return p.masked()
+    }
+
+    /** Share finale: an upward arrow draws its shaft and head, then leaves
+     *  three short motion streaks above it. */
+    fun matrixSendFrame(size: Int, phase: Int, frameCount: Int): IntArray {
+        if (size <= 0) return IntArray(0)
+        val p = MatrixPainter(size)
+        p.ring()
+        val t = phase.coerceIn(0, frameCount - 1).toFloat() / (frameCount - 1).coerceAtLeast(1)
+        val bottom = p.center + p.span
+        val top = p.center - p.span
+        val shaft = (t / 0.65f).coerceIn(0f, 1f)
+        val headY = bottom - ((bottom - top) * shaft).roundToInt()
+        p.line(p.center, bottom, p.center, headY, MAX_LIGHT)
+        if (t > 0.5f) {
+            val head = ((t - 0.5f) / 0.5f).coerceIn(0f, 1f)
+            val reach = (p.span * head).roundToInt()
+            p.line(p.center, headY, p.center - reach, headY + reach, MAX_LIGHT)
+            p.line(p.center, headY, p.center + reach, headY + reach, MAX_LIGHT)
+        }
+        if (t > 0.8f) {
+            for (dx in listOf(-3, 0, 3)) {
+                val x = p.center + dx
+                if (x in 0 until size) p.line(x, 1, x, 2, MED_LIGHT)
+            }
+        }
+        return p.masked()
+    }
+
+    /** Import: three staggered pages slide in from the left at different
+     *  speeds, with a few data-flicker pixels on the right. */
+    fun matrixImportFrame(size: Int, phase: Int, frameCount: Int = 8): IntArray {
+        if (size <= 0) return IntArray(0)
+        val p = MatrixPainter(size)
+        p.ring()
+        val t = phase.coerceIn(0, frameCount - 1).toFloat() / (frameCount - 1).coerceAtLeast(1)
+        if (t < 0.15f) p.dot(0, p.center, MAX_LIGHT)
+        val width = maxOf(4, size * 7 / 25)
+        for (i in 0..2) {
+            val local = (t * 1.35f - i * 0.2f).coerceIn(0f, 1f)
+            val x = (-width + local * (p.center + width)).roundToInt()
+            val y = p.center + (i - 1) * maxOf(2, size / 8)
+            val value = when (i) { 0 -> MAX_LIGHT; 1 -> MED_LIGHT; else -> LOW_LIGHT }
+            p.file(x, y, value)
+        }
+        if (t > 0.45f) {
+            val x = size - 2
+            val y = p.center + ((phase * 3) % maxOf(2, p.span)) - p.span / 2
+            p.dot(x, y, MED_LIGHT)
+            p.dot(x - 1, y + 1, LOW_LIGHT)
+        }
+        return p.masked()
+    }
+
+    /** Self-drawing check used by import/save completion. */
+    fun matrixCheckFrame(size: Int, progress: Int): IntArray {
+        if (size <= 0) return IntArray(0)
+        val p = MatrixPainter(size)
+        p.ring()
+        p.check(progress.coerceIn(0, 100) / 100f, MAX_LIGHT)
+        if (progress > 85) p.sparkles()
+        return p.masked()
+    }
+
+    /** Enter/back snap: a single directional chevron. Undo/redo use a double
+     *  chevron so the same family reads distinctly. */
+    fun matrixArrowFrame(size: Int, direction: MatrixDirection, double: Boolean = false): IntArray {
+        if (size <= 0) return IntArray(0)
+        val p = MatrixPainter(size)
+        p.ring()
+        p.arrow(direction, MAX_LIGHT, double)
+        return p.masked()
     }
 
     /** A comet sweeping across the matrix: one blazing row plus two trail rows. */

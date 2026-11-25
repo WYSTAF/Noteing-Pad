@@ -414,6 +414,16 @@ object GlyphSupport {
         val m = model
         val blank = IntArray(m.channelCount)
         worker.execute {
+            if (m.isMatrix) {
+                for (phase in 0 until 6) {
+                    if (animGen.get() != gen) return@execute
+                    sendFrame(GlyphPatterns.matrixSaveFrame(m.matrixSize, phase, 6))
+                    sleepUninterruptibly(70)
+                }
+                if (animGen.get() != gen) return@execute
+                sendFrame(blank)
+                return@execute
+            }
             val start = shownDownload
             val steps = ((abs(100 - start) + 3) / 4).coerceIn(2, 12)
             for (step in 1..steps) {
@@ -471,6 +481,16 @@ object GlyphSupport {
         val m = model
         val blank = IntArray(m.channelCount)
         worker.execute {
+            if (m.isMatrix) {
+                for (phase in 0 until 5) {
+                    if (animGen.get() != gen) return@execute
+                    sendFrame(GlyphPatterns.matrixSendFrame(m.matrixSize, phase, 5))
+                    sleepUninterruptibly(70)
+                }
+                if (animGen.get() != gen) return@execute
+                sendFrame(blank)
+                return@execute
+            }
             val start = shownUpload
             val steps = ((abs(100 - start) + 3) / 4).coerceIn(2, 12)
             for (step in 1..steps) {
@@ -517,6 +537,16 @@ object GlyphSupport {
         val m = model
         val blank = IntArray(m.channelCount)
         worker.execute {
+            if (m.isMatrix) {
+                for (phase in 0 until 5) {
+                    if (animGen.get() != gen) return@execute
+                    sendFrame(GlyphPatterns.matrixCheckFrame(m.matrixSize, phase * 25))
+                    sleepUninterruptibly(60)
+                }
+                if (animGen.get() != gen) return@execute
+                sendFrame(blank)
+                return@execute
+            }
             if (animGen.get() != gen) return@execute
             sendFrame(GlyphPatterns.impactFrame(m, atTop = false))
             sleepUninterruptibly(90)
@@ -595,7 +625,9 @@ object GlyphSupport {
         worker.execute {
             repeat(2) {
                 if (animGen.get() != gen) return@execute
-                sendFrame(GlyphPatterns.snapFrame(m, GlyphPatterns.SnapSide.LEFT))
+                sendFrame(if (m.isMatrix)
+                    GlyphPatterns.matrixArrowFrame(m.matrixSize, GlyphPatterns.MatrixDirection.LEFT, double = true)
+                else GlyphPatterns.snapFrame(m, GlyphPatterns.SnapSide.LEFT))
                 sleepUninterruptibly(30)
                 if (animGen.get() != gen) return@execute
                 sendFrame(blank)
@@ -615,7 +647,9 @@ object GlyphSupport {
         worker.execute {
             repeat(2) {
                 if (animGen.get() != gen) return@execute
-                sendFrame(GlyphPatterns.snapFrame(m, GlyphPatterns.SnapSide.RIGHT))
+                sendFrame(if (m.isMatrix)
+                    GlyphPatterns.matrixArrowFrame(m.matrixSize, GlyphPatterns.MatrixDirection.RIGHT, double = true)
+                else GlyphPatterns.snapFrame(m, GlyphPatterns.SnapSide.RIGHT))
                 sleepUninterruptibly(30)
                 if (animGen.get() != gen) return@execute
                 sendFrame(blank)
